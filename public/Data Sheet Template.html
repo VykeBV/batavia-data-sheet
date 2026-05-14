@@ -763,6 +763,61 @@
     color: rgba(255, 255, 255, 0.22);
     font-weight: 400;
   }
+
+  /* ─── Mobile layout (≤ 768px): canvas sticky at top, Tweaks inline below ─ */
+  @media (max-width: 768px) {
+    body {
+      display: block;
+      align-items: stretch;
+      justify-content: flex-start;
+      padding: 0;
+      overflow-x: hidden;
+    }
+    .stage {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      margin: 0 auto !important;
+      padding: 12px 0 14px;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(157,201,232,.06), transparent 60%),
+        #2b2d31;
+      box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.6);
+    }
+    .twk-panel {
+      position: static !important;
+      right: auto !important;
+      bottom: auto !important;
+      left: auto !important;
+      top: auto !important;
+      width: calc(100% - 24px) !important;
+      max-width: 480px !important;
+      margin: 6px auto 16px !important;
+      border-radius: 12px !important;
+    }
+    .twk-panel .twk-body {
+      max-height: none !important;
+      overflow: visible !important;
+    }
+    #__standalone-tweaks-btn {
+      right: 12px !important;
+      bottom: 12px !important;
+    }
+    #__help-btn {
+      left: 12px !important;
+      bottom: 12px !important;
+    }
+    #__help-card {
+      left: 12px !important;
+      right: 12px !important;
+      bottom: 58px !important;
+      width: auto !important;
+      max-width: calc(100vw - 24px) !important;
+    }
+    .icon-picker {
+      max-width: calc(100vw - 24px) !important;
+    }
+  }
 </style>
 <script>
   (function () {

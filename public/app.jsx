@@ -982,12 +982,14 @@ function App() {
       const stage = stageRef.current;
       const card = cardRef.current;
       if (!stage || !card) return;
-      const avW = window.innerWidth - 48;
-      const avH = window.innerHeight - 48;
+      const isMobile = window.matchMedia("(max-width: 768px)").matches;
+      const avW = window.innerWidth - (isMobile ? 24 : 48);
+      const avH = isMobile ? window.innerHeight * 0.38 : window.innerHeight - 48;
+      const maxScale = isMobile ? 1.0 : 1.45;
       const cw = card.offsetWidth;
       const ch = card.offsetHeight;
       if (cw === 0 || ch === 0) return;
-      const scale = Math.min(avW / cw, avH / ch, 1.45);
+      const scale = Math.min(avW / cw, avH / ch, maxScale);
       stage.style.transform = `scale(${scale})`;
       stage.style.width = (cw * scale) + "px";
       stage.style.height = (ch * scale) + "px";
