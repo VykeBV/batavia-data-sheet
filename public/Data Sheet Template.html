@@ -893,19 +893,25 @@
     var btn = document.createElement("button");
     btn.id = "__standalone-tweaks-btn";
     btn.textContent = "✦  Tweaks";
-    btn.style.display = "block";
+    btn.style.display = "none";
     btn.addEventListener("click", function () {
       window.postMessage({ type: "__activate_edit_mode" }, "*");
-      btn.style.display = "none";
     });
     document.body.appendChild(btn);
-    window.addEventListener("message", function (e) {
-      var t = e && e.data && e.data.type;
-      if (t === "__edit_mode_dismissed") btn.style.display = "block";
-      if (t === "__activate_edit_mode")  btn.style.display = "none";
-    });
+    // The Tweaks panel's `dismiss()` posts to `window.parent` — when the page
+    // is iframed (Webflow, etc.) that goes to the host, not back to us. So
+    // listen to the DOM instead: the panel renders only while open, so its
+    // presence in the DOM IS the open state.
+    var root = document.getElementById("root");
+    var syncFab = function () {
+      btn.style.display = document.querySelector(".twk-panel") ? "none" : "block";
+    };
+    if (root && "MutationObserver" in window) {
+      new MutationObserver(syncFab).observe(root, { childList: true, subtree: true });
+    }
     setTimeout(function () {
       window.postMessage({ type: "__activate_edit_mode" }, "*");
+      setTimeout(syncFab, 100);
     }, 400);
   })();
 
