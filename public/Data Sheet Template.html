@@ -625,5 +625,39 @@
 <script type="text/babel" src="tweaks-panel.jsx"></script>
 <script type="text/babel" src="icons.jsx"></script>
 <script type="text/babel" src="app.jsx"></script>
+
+<style>
+  #__standalone-tweaks-btn {
+    position: fixed; right: 16px; bottom: 16px;
+    z-index: 2147483645;
+    padding: 8px 14px;
+    border: 0; border-radius: 999px;
+    font: 600 12px/1 "Roboto", system-ui, sans-serif;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    display: none;
+  }
+</style>
+<script>
+  (function () {
+    var btn = document.createElement("button");
+    btn.id = "__standalone-tweaks-btn";
+    btn.textContent = "✦  Tweaks";
+    btn.style.display = "block";
+    btn.addEventListener("click", function () {
+      window.postMessage({ type: "__activate_edit_mode" }, "*");
+      btn.style.display = "none";
+    });
+    document.body.appendChild(btn);
+    window.addEventListener("message", function (e) {
+      var t = e && e.data && e.data.type;
+      if (t === "__edit_mode_dismissed") btn.style.display = "block";
+      if (t === "__activate_edit_mode")  btn.style.display = "none";
+    });
+    setTimeout(function () {
+      window.postMessage({ type: "__activate_edit_mode" }, "*");
+    }, 400);
+  })();
+</script>
 </body>
 </html>
