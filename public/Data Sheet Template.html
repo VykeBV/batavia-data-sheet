@@ -755,6 +755,14 @@
     color: rgba(255, 255, 255, 0.35);
     font-weight: 500;
   }
+  #__help-card .hc-ft-sub {
+    display: block;
+    margin-top: 4px;
+    font-size: 8.5px;
+    letter-spacing: 0.22em;
+    color: rgba(255, 255, 255, 0.22);
+    font-weight: 400;
+  }
 </style>
 <script>
   (function () {
@@ -798,7 +806,7 @@
       +     '<li><span>Export with <b>Tweaks → Download as PDF</b> — exact 10×9.5 or 20×9.5 cm, print-ready CMYK.</span></li>'
       +   '</ul>'
       + '</div>'
-      + '<div class="hc-ft">Vyke Create · Batavia</div>';
+      + '<div class="hc-ft">Vyke Create · Batavia<span class="hc-ft-sub">powered by XAFAI</span></div>';
 
     var helpBtn = document.createElement("button");
     helpBtn.id = "__help-btn";
