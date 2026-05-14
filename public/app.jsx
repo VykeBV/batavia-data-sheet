@@ -1079,9 +1079,12 @@ function App() {
       <TweaksPanel>
         <TweakSection label="Format" />
         <TweakRadio
-          label="Aspect ratio"
+          label="Print size"
           value={t.ratio}
-          options={["10:9.5", "20:9.5"]}
+          options={[
+            { value: "10:9.5", label: "10 × 9.5 cm" },
+            { value: "20:9.5", label: "20 × 9.5 cm" },
+          ]}
           onChange={(v) => setTweak("ratio", v)}
         />
 
