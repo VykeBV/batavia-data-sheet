@@ -637,6 +637,124 @@
     cursor: pointer;
     display: none;
   }
+
+  /* ─── Quick-start help (bottom-left) ─────────────────────────────── */
+  #__help-btn {
+    position: fixed; left: 16px; bottom: 16px;
+    z-index: 2147483645;
+    width: 36px; height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #9DC9E8, #7FB6DC);
+    color: #000;
+    font: 700 16px/1 "Roboto", system-ui, sans-serif;
+    cursor: pointer;
+    box-shadow:
+      0 6px 24px rgba(157, 201, 232, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+    transition: transform .08s ease, box-shadow .15s ease;
+  }
+  #__help-btn:hover {
+    background: linear-gradient(180deg, #BCE0F2, #9DC9E8);
+    box-shadow: 0 8px 28px rgba(157, 201, 232, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+    transform: translateY(-1px);
+  }
+  #__help-card {
+    position: fixed; left: 16px; bottom: 62px;
+    z-index: 2147483645;
+    width: 300px;
+    background: rgba(18, 19, 23, 0.88);
+    color: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    -webkit-backdrop-filter: blur(28px) saturate(140%);
+    backdrop-filter: blur(28px) saturate(140%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 20px 60px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(157, 201, 232, 0.08);
+    font: 11.5px/1.45 "Inter", "Roboto", system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    transform-origin: bottom left;
+    transition: opacity .14s ease, transform .14s ease;
+  }
+  #__help-card[hidden] {
+    display: block !important;
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+    pointer-events: none;
+  }
+  #__help-card .hc-hd {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px;
+    background:
+      linear-gradient(180deg, rgba(157, 201, 232, 0.10), rgba(157, 201, 232, 0) 80%),
+      linear-gradient(180deg, #0c0c11, #0a0a0e);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  #__help-card .hc-title {
+    color: #9DC9E8;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    font-size: 9.5px;
+    text-transform: uppercase;
+  }
+  #__help-card .hc-x {
+    appearance: none;
+    border: 0;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 14px; line-height: 1;
+    cursor: pointer;
+    transition: background .12s ease, color .12s ease;
+  }
+  #__help-card .hc-x:hover {
+    background: rgba(157, 201, 232, 0.18);
+    color: #fff;
+  }
+  #__help-card .hc-body { padding: 12px 14px 8px; }
+  #__help-card ul {
+    list-style: none;
+    margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #__help-card li {
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    gap: 9px;
+    align-items: start;
+    color: rgba(255, 255, 255, 0.85);
+  }
+  #__help-card li::before {
+    content: "";
+    width: 6px; height: 6px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: #9DC9E8;
+    box-shadow: 0 0 0 3px rgba(157, 201, 232, 0.18);
+  }
+  #__help-card b { color: #fff; font-weight: 600; }
+  #__help-card code {
+    background: rgba(255, 255, 255, 0.08);
+    color: #9DC9E8;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font: 10.5px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  #__help-card .hc-ft {
+    margin-top: 4px;
+    padding: 10px 14px 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 500;
+  }
 </style>
 <script>
   (function () {
@@ -657,6 +775,65 @@
     setTimeout(function () {
       window.postMessage({ type: "__activate_edit_mode" }, "*");
     }, 400);
+  })();
+
+  (function () {
+    var SEEN_KEY = "vykecreate.helpSeen.v1";
+    var card = document.createElement("div");
+    card.id = "__help-card";
+    card.hidden = true;
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-label", "Quick start");
+    card.innerHTML = ''
+      + '<div class="hc-hd">'
+      +   '<span class="hc-title">Quick start</span>'
+      +   '<button class="hc-x" type="button" aria-label="Close">×</button>'
+      + '</div>'
+      + '<div class="hc-body">'
+      +   '<ul>'
+      +     '<li><span><b>Click any text</b> — title, tagline, spec rows, or “SCAN ME” — to edit it inline.</span></li>'
+      +     '<li><span><b>Click an icon</b> to swap it. Use <b>Upload</b> in the picker for your own SVG.</span></li>'
+      +     '<li><span>Hover a row → <code>×</code> deletes it. Hover the card → <b>+ Add spec</b> appears.</span></li>'
+      +     '<li><span>Open the <b>Tweaks</b> panel (top-right) for aspect ratio, colors, QR settings, and save/load.</span></li>'
+      +     '<li><span>Export with <b>Tweaks → Download as PDF</b> — exact 10×9.5 or 20×9.5 cm, print-ready CMYK.</span></li>'
+      +   '</ul>'
+      + '</div>'
+      + '<div class="hc-ft">Vyke Create · Batavia</div>';
+
+    var helpBtn = document.createElement("button");
+    helpBtn.id = "__help-btn";
+    helpBtn.type = "button";
+    helpBtn.setAttribute("aria-label", "Quick start");
+    helpBtn.setAttribute("aria-expanded", "false");
+    helpBtn.textContent = "?";
+
+    function setOpen(open) {
+      card.hidden = !open;
+      helpBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) {
+        try { localStorage.setItem(SEEN_KEY, "1"); } catch (e) {}
+      }
+    }
+    helpBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      setOpen(card.hidden);
+    });
+    card.querySelector(".hc-x").addEventListener("click", function () { setOpen(false); });
+    document.addEventListener("click", function (e) {
+      if (card.hidden) return;
+      if (card.contains(e.target) || helpBtn.contains(e.target)) return;
+      setOpen(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !card.hidden) setOpen(false);
+    });
+
+    document.body.appendChild(card);
+    document.body.appendChild(helpBtn);
+
+    var seen = false;
+    try { seen = localStorage.getItem(SEEN_KEY) === "1"; } catch (e) {}
+    if (!seen) setTimeout(function () { setOpen(true); }, 900);
   })();
 </script>
 </body>
