@@ -9,22 +9,24 @@
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    min-height: 100vh;
+    height: 100vh;
     font-family: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
     background:
       radial-gradient(ellipse 80% 50% at 50% 0%, rgba(157,201,232,.05), transparent 60%),
       #2b2d31;
     color: #fff;
     display: flex;
-    align-items: safe center;
-    justify-content: safe center;
-    padding: 24px 16px;
-    overflow: auto;
+    align-items: center;
+    justify-content: center;
+    padding: 16px 352px 16px 16px; /* right gutter reserves space for the Tweaks panel */
+    overflow: hidden;
   }
   .stage {
-    transform-origin: top left;
+    transform-origin: center;
     display: block;
   }
+  /* Mobile top bar — hidden on desktop, replaced by floating help button. */
+  .mobile-topbar { display: none; }
 
   /* ─── Vyke Create dark-mode UI override for Tweaks panel ──────── */
   .twk-panel {
@@ -620,6 +622,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
+<header class="mobile-topbar" role="banner">
+  <span class="mobile-topbar-logo" aria-label="Vyke Create"></span>
+  <button class="mobile-topbar-help" type="button" aria-label="Quick start">?</button>
+</header>
 <div id="root"></div>
 
 <script type="text/babel" src="tweaks-panel.jsx"></script>
@@ -764,25 +770,77 @@
     font-weight: 400;
   }
 
-  /* ─── Mobile layout (≤ 768px): canvas sticky at top, Tweaks inline below ─ */
+  /* ─── Mobile layout (≤ 768px): topbar + fixed 30vh canvas + scroll Tweaks ─ */
   @media (max-width: 768px) {
     body {
       display: block;
-      align-items: stretch;
-      justify-content: flex-start;
       padding: 0;
+      overflow: hidden;
+      height: 100vh;
+    }
+    .mobile-topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 12px;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 48px;
+      background:
+        linear-gradient(180deg, rgba(157, 201, 232, 0.10), rgba(157, 201, 232, 0) 80%),
+        linear-gradient(180deg, #0c0c11, #0a0a0e);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      z-index: 30;
+    }
+    .mobile-topbar-logo {
+      flex: 1;
+      height: 28px;
+      background-image: url("vyke-create-logo.png");
+      background-size: contain;
+      background-position: left center;
+      background-repeat: no-repeat;
+      filter: drop-shadow(0 1px 10px rgba(157, 201, 232, 0.18));
+    }
+    .mobile-topbar-help {
+      appearance: none;
+      width: 32px; height: 32px;
+      border: 0;
+      border-radius: 50%;
+      background: linear-gradient(180deg, #9DC9E8, #7FB6DC);
+      color: #000;
+      font: 700 14px/1 "Roboto", system-ui, sans-serif;
+      cursor: pointer;
+      box-shadow:
+        0 4px 14px rgba(157, 201, 232, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+    }
+    .mobile-topbar-help:active {
+      transform: translateY(1px);
+    }
+    #root {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      overflow-y: auto;
       overflow-x: hidden;
+      padding-top: calc(48px + 30vh);
     }
     .stage {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      margin: 0 auto !important;
-      padding: 12px 0 14px;
-      background:
-        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(157,201,232,.06), transparent 60%),
-        #2b2d31;
-      box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.6);
+      position: fixed !important;
+      top: 48px !important;
+      left: 0 !important;
+      right: 0 !important;
+      width: auto !important;
+      height: 30vh !important;
+      transform: none !important;
+      z-index: 20;
+      background: #2b2d31;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .datasheet {
+      flex-shrink: 0;
     }
     .twk-panel {
       position: static !important;
@@ -790,36 +848,40 @@
       bottom: auto !important;
       left: auto !important;
       top: auto !important;
-      width: calc(100% - 24px) !important;
-      max-width: 480px !important;
-      margin: 6px auto 16px !important;
-      border-radius: 12px !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      height: auto !important;
+      max-height: none !important;
+      margin: 0 !important;
+      border-radius: 12px 12px 0 0 !important;
+      border-bottom: 0 !important;
+      transform: none !important;
+    }
+    .twk-panel .twk-hd {
+      display: none !important;
     }
     .twk-panel .twk-body {
       max-height: none !important;
       overflow: visible !important;
+      padding-bottom: 28px !important;
     }
-    #__standalone-tweaks-btn {
-      left: 50% !important;
-      right: auto !important;
-      bottom: 16px !important;
-      transform: translateX(-50%) !important;
-      padding: 12px 22px !important;
-      font-size: 14px !important;
-      box-shadow:
-        0 12px 32px rgba(157, 201, 232, 0.5),
-        0 0 0 1px rgba(255, 255, 255, 0.18) inset !important;
-    }
-    #__help-btn {
-      left: 12px !important;
-      bottom: 12px !important;
-    }
+    /* Desktop floating chrome — hidden, the topbar replaces it on mobile. */
+    #__help-btn { display: none !important; }
+    #__standalone-tweaks-btn { display: none !important; }
+    /* Hide the Tweaks "close" so it can't be dismissed (it's the whole scroll area). */
+    .twk-panel .twk-x { display: none !important; }
     #__help-card {
+      position: fixed !important;
+      top: 56px !important;
       left: 12px !important;
       right: 12px !important;
-      bottom: 58px !important;
+      bottom: auto !important;
       width: auto !important;
       max-width: calc(100vw - 24px) !important;
+      transform-origin: top right;
+    }
+    #__help-card[hidden] {
+      transform: translateY(-8px) scale(0.96);
     }
     .icon-picker {
       max-width: calc(100vw - 24px) !important;
@@ -888,10 +950,18 @@
       e.stopPropagation();
       setOpen(card.hidden);
     });
+    var topbarHelp = document.querySelector(".mobile-topbar-help");
+    if (topbarHelp) {
+      topbarHelp.addEventListener("click", function (e) {
+        e.stopPropagation();
+        setOpen(card.hidden);
+      });
+    }
     card.querySelector(".hc-x").addEventListener("click", function () { setOpen(false); });
     document.addEventListener("click", function (e) {
       if (card.hidden) return;
       if (card.contains(e.target) || helpBtn.contains(e.target)) return;
+      if (topbarHelp && topbarHelp.contains(e.target)) return;
       setOpen(false);
     });
     document.addEventListener("keydown", function (e) {

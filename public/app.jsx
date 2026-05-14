@@ -886,20 +886,33 @@ function App() {
 
   const withStageNeutral = async (fn) => {
     const stage = document.querySelector(".stage");
-    const prevTransform = stage ? stage.style.transform : "";
-    const prevW = stage ? stage.style.width : "";
-    const prevH = stage ? stage.style.height : "";
+    const card = document.querySelector(".datasheet");
+    const prev = {
+      stT: stage ? stage.style.transform : "",
+      stW: stage ? stage.style.width : "",
+      stH: stage ? stage.style.height : "",
+      cT: card ? card.style.transform : "",
+      cO: card ? card.style.transformOrigin : "",
+    };
     if (stage) {
       stage.style.transform = "none";
       stage.style.width = "auto";
       stage.style.height = "auto";
     }
+    if (card) {
+      card.style.transform = "none";
+      card.style.transformOrigin = "";
+    }
     try { return await fn(); }
     finally {
       if (stage) {
-        stage.style.transform = prevTransform;
-        stage.style.width = prevW;
-        stage.style.height = prevH;
+        stage.style.transform = prev.stT;
+        stage.style.width = prev.stW;
+        stage.style.height = prev.stH;
+      }
+      if (card) {
+        card.style.transform = prev.cT;
+        card.style.transformOrigin = prev.cO;
       }
     }
   };
@@ -983,16 +996,32 @@ function App() {
       const card = cardRef.current;
       if (!stage || !card) return;
       const isMobile = window.matchMedia("(max-width: 768px)").matches;
-      const avW = window.innerWidth - (isMobile ? 24 : 48);
-      const avH = isMobile ? window.innerHeight * 0.38 : window.innerHeight - 48;
+      // Desktop reserves a 320px right gutter for the Tweaks panel.
+      // Mobile uses a fixed 30vh canvas viewport.
+      const avW = isMobile ? window.innerWidth - 24 : window.innerWidth - 384;
+      const avH = isMobile ? (window.innerHeight * 0.30 - 24) : (window.innerHeight - 48);
       const maxScale = isMobile ? 1.0 : 1.45;
       const cw = card.offsetWidth;
       const ch = card.offsetHeight;
       if (cw === 0 || ch === 0) return;
       const scale = Math.min(avW / cw, avH / ch, maxScale);
-      stage.style.transform = `scale(${scale})`;
-      stage.style.width = (cw * scale) + "px";
-      stage.style.height = (ch * scale) + "px";
+      if (isMobile) {
+        // Mobile: stage is a fixed flex container (CSS); scale the card directly,
+        // leaving the stage's box untouched so the fixed 30vh region stays fixed.
+        stage.style.transform = "";
+        stage.style.width = "";
+        stage.style.height = "";
+        card.style.transform = `scale(${scale})`;
+        card.style.transformOrigin = "center";
+      } else {
+        // Desktop: scale the stage (centered transform-origin), box stays at the
+        // unscaled card size so the layout extent matches the visible card.
+        card.style.transform = "";
+        card.style.transformOrigin = "";
+        stage.style.transform = `scale(${scale})`;
+        stage.style.width = cw + "px";
+        stage.style.height = ch + "px";
+      }
     };
     fit();
     const ro = new ResizeObserver(fit);
