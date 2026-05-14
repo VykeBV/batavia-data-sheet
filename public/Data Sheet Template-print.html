@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Product Data Sheet Template</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    font-family: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #f3f3f1;
+    color: #111;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+
+  /* ─── Datasheet card ───────────────────────────────────────── */
+  .datasheet {
+    --accent: #F39200;
+    --ratio-w: 10;
+    --ratio-h: 9.5;
+    /* Triangle is a right-side wedge. Content lives in the
+       remaining safe rectangle on the left. */
+    --triangle-width: 38%;
+    --safe-width: 60%;      /* content area width on the left */
+    container-type: inline-size;
+    position: relative;
+    width: min(92vw, calc((100vh - 80px) * var(--ratio-w) / var(--ratio-h)), 1240px);
+    aspect-ratio: var(--ratio-w) / var(--ratio-h);
+    background: #fff;
+    overflow: hidden;
+    padding: 5% 5%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 30px 80px -30px rgba(0,0,0,.25), 0 1px 0 rgba(0,0,0,.04);
+    border-radius: 4px;
+  }
+  /* Wide variant: triangle narrower, content fills more of the card */
+  .datasheet.is-wide {
+    --triangle-width: 26%;
+    --safe-width: 70%;
+  }
+
+  /* Body layout — constrained to the safe rectangle to the left of the triangle.
+     Bottom padding reserves room for the absolutely-positioned QR block. */
+  .ds-body {
+    position: relative;
+    z-index: 2;
+    width: var(--safe-width);
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding-bottom: clamp(140px, 26%, 230px);
+  }
+  .datasheet.is-wide .ds-body { padding-bottom: clamp(120px, 22%, 200px); }
+  .ds-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .datasheet.is-wide .ds-main { justify-content: center; }
+
+  /* Header */
+  .ds-header { position: relative; z-index: 2; }
+  .ds-title {
+    display: block;
+    font-family: "Roboto", sans-serif;
+    font-weight: 900;
+    font-size: clamp(20px, 4.6cqi, 56px);
+    line-height: 1.02;
+    letter-spacing: -0.01em;
+    color: #111;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .ds-subtitle {
+    display: block;
+    font-family: "Roboto", sans-serif;
+    font-weight: 400;
+    font-size: clamp(13px, 2.4cqi, 28px);
+    line-height: 1.25;
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .datasheet.is-wide .ds-title { font-size: clamp(20px, 3cqi, 48px); }
+  .datasheet.is-wide .ds-subtitle { font-size: clamp(13px, 1.6cqi, 22px); }
+
+  /* Spec rows */
+  .ds-specs {
+    position: relative;
+    z-index: 2;
+    margin-top: 3.5%;
+    display: flex;
+    flex-direction: column;
+    gap: 1.6%;
+  }
+  .spec-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .spec-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: 1;
+    min-width: 0;
+  }
+  .spec-icon {
+    appearance: none;
+    border: 1.5px dashed transparent;
+    background: transparent;
+    width: clamp(30px, 6cqi, 64px);
+    height: clamp(30px, 6cqi, 64px);
+    padding: 4px;
+    color: #111;
+    cursor: pointer;
+    border-radius: 6px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .datasheet.is-wide .spec-icon { width: clamp(28px, 3.8cqi, 52px); height: clamp(28px, 3.8cqi, 52px); }
+  .spec-icon:hover { border-color: rgba(0,0,0,.18); background: rgba(0,0,0,.02); }
+  .spec-icon svg { width: 100%; height: 100%; display: block; }
+  .spec-text {
+    font-family: "Roboto", sans-serif;
+    font-size: clamp(12px, 2.4cqi, 26px);
+    font-weight: 300;
+    color: #111;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+  .datasheet.is-wide .spec-text { font-size: clamp(12px, 1.6cqi, 22px); }
+
+  /* Row hover controls */
+  .spec-remove {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: rgba(0,0,0,.35);
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .15s ease, background .15s ease, color .15s ease;
+    margin-left: 6px;
+  }
+  .spec-wrap:hover .spec-remove { opacity: 1; }
+  .spec-remove:hover { background: rgba(0,0,0,.06); color: #111; }
+
+  .spec-add {
+    align-self: flex-start;
+    appearance: none;
+    border: 1px dashed rgba(0,0,0,.18);
+    background: transparent;
+    color: rgba(0,0,0,.5);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .datasheet:hover .spec-add { opacity: 1; }
+  .spec-add:hover { color: #111; border-color: rgba(0,0,0,.4); }
+
+  /* QR block — always anchored bottom-left, aligned with title's left edge. */
+  .ds-qr {
+    position: absolute;
+    left: 5%;
+    bottom: 5%;
+    z-index: 2;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .qr-frame {
+    position: relative;
+    padding: 8px;
+    width: clamp(100px, 18cqi, 180px);
+    height: clamp(100px, 18cqi, 180px);
+    display: grid;
+    place-items: center;
+  }
+  .datasheet.is-wide .qr-frame { width: clamp(100px, 12cqi, 160px); height: clamp(100px, 12cqi, 160px); }
+  .qr-frame svg { width: 100%; height: 100%; }
+  .qr-bracket {
+    position: absolute;
+    width: clamp(16px, 3.2cqi, 28px);
+    height: clamp(16px, 3.2cqi, 28px);
+    border: 3px solid var(--accent);
+  }
+  .qr-tl { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+  .qr-tr { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+  .qr-bl { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+  .qr-br { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+  .qr-label {
+    font-size: clamp(10px, 1.5cqi, 16px);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #111;
+    white-space: nowrap;
+  }
+
+  /* Side triangle — sits on the right of the card, never overlaps content.
+     Right angle at bottom-right; hypotenuse slants up to top-right corner. */
+  .ds-triangle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--triangle-width);
+    background: var(--accent);
+    clip-path: polygon(100% 0%, 100% 100%, 0% 100%);
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* ─── Editable text ────────────────────────────────────────── */
+  .editable {
+    outline: none;
+    border-radius: 3px;
+    transition: background .15s ease, box-shadow .15s ease;
+    cursor: text;
+    -webkit-user-modify: read-write-plaintext-only;
+  }
+  .editable:hover { background: rgba(0,0,0,.04); }
+  .editable:focus { background: rgba(0,0,0,.05); box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+  .editable:empty::before {
+    content: attr(data-placeholder);
+    color: rgba(0,0,0,.3);
+  }
+
+  /* ─── Icon picker popover ──────────────────────────────────── */
+  .icon-picker {
+    width: 272px;
+    z-index: 2147483647;
+    background: rgba(255,255,255,.96);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(160%);
+    border: 0.5px solid rgba(0,0,0,.12);
+    border-radius: 12px;
+    box-shadow: 0 12px 36px rgba(0,0,0,.18);
+    padding: 10px;
+    transform: scale(var(--dc-inv-zoom, 1));
+    transform-origin: top left;
+  }
+  .icon-picker-hd {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: rgba(0,0,0,.5);
+    padding: 4px 6px 8px;
+  }
+  .icon-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+  }
+  .icon-tile {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 8px;
+    padding: 8px 4px 6px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: #111;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .icon-tile:hover { background: rgba(0,0,0,.05); }
+  .icon-tile.is-active { border-color: var(--accent, #F39200); background: rgba(243,146,0,.08); }
+  .icon-tile-svg { width: 26px; height: 26px; display: grid; place-items: center; }
+  .icon-tile-svg svg { width: 100%; height: 100%; display: block; }
+  .icon-tile-label {
+    font-size: 9.5px;
+    color: rgba(0,0,0,.55);
+    text-align: center;
+    line-height: 1.1;
+    letter-spacing: 0.02em;
+  }
+
+  /* ─── Print styles ─────────────────────────────────────────── */
+  @page { size: landscape; margin: 0.6cm; }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html, body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+    body { display: block !important; min-height: 0 !important; }
+    .datasheet {
+      width: 100% !important;
+      max-width: none !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      margin: 0 !important;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .twk-panel, .icon-picker, .spec-remove, .spec-add { display: none !important; }
+    .editable { background: transparent !important; box-shadow: none !important; }
+    .spec-icon { border-color: transparent !important; background: transparent !important; cursor: default !important; }
+  }
+
+  /* Tweaks tip block */
+  .twk-tip {
+    font-size: 11px;
+    color: rgba(41,38,27,.7);
+    line-height: 1.55;
+    padding: 2px 0;
+  }
+  .twk-tip b { color: #29261b; font-weight: 600; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+
+<script type="text/babel">
+  (async () => {
+    try { await document.fonts.ready; } catch (e) {}
+    const waitForQr = () => new Promise((res) => {
+      const tick = () => {
+        if (document.querySelector('.qr-frame svg rect')) res();
+        else setTimeout(tick, 80);
+      };
+      tick();
+      setTimeout(res, 3000);
+    });
+    await waitForQr();
+    await new Promise(r => setTimeout(r, 500));
+    window.print();
+  })();
+</script>
+</body>
+</html>

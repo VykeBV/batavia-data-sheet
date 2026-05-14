@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Product Data Sheet Template</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    font-family: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(157,201,232,.05), transparent 60%),
+      #2b2d31;
+    color: #fff;
+    display: flex;
+    align-items: safe center;
+    justify-content: safe center;
+    padding: 24px 16px;
+    overflow: auto;
+  }
+  .stage {
+    transform-origin: top left;
+    display: block;
+  }
+
+  /* ─── Vyke Create dark-mode UI override for Tweaks panel ──────── */
+  .twk-panel {
+    background: rgba(18, 19, 23, 0.88) !important;
+    color: rgba(255, 255, 255, 0.92) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(140%) !important;
+    backdrop-filter: blur(28px) saturate(140%) !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 20px 60px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(157, 201, 232, 0.08) !important;
+    width: 320px !important;
+    font: 11.5px/1.4 "Inter", "Roboto", system-ui, -apple-system, sans-serif !important;
+  }
+  /* Header — Vyke Create logo, padded for premium feel */
+  .twk-panel .twk-hd {
+    background:
+      linear-gradient(180deg, rgba(157, 201, 232, 0.10), rgba(157, 201, 232, 0) 80%),
+      linear-gradient(180deg, #0c0c11, #0a0a0e);
+    height: 64px;
+    padding: 12px 14px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    position: relative;
+    gap: 10px;
+  }
+  .twk-panel .twk-hd b {
+    flex: 1;
+    height: 100%;
+    background-image: url("vyke-create-logo.png");
+    background-size: contain;
+    background-position: left center;
+    background-repeat: no-repeat;
+    text-indent: -9999px;
+    overflow: hidden;
+    filter: drop-shadow(0 1px 10px rgba(157, 201, 232, 0.18));
+  }
+  .twk-panel .twk-x {
+    color: rgba(255, 255, 255, 0.55) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    z-index: 1;
+  }
+  .twk-panel .twk-x:hover {
+    color: #fff !important;
+    background: rgba(157, 201, 232, 0.18) !important;
+  }
+  .twk-panel .twk-body {
+    padding: 4px 16px 16px !important;
+    scrollbar-color: rgba(157, 201, 232, 0.2) transparent !important;
+  }
+  .twk-panel .twk-body::-webkit-scrollbar-thumb {
+    background: rgba(157, 201, 232, 0.18) !important;
+  }
+  .twk-panel .twk-sect {
+    color: #9DC9E8 !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.12em !important;
+    font-size: 9.5px !important;
+    padding-top: 14px !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    margin-top: 6px;
+  }
+  .twk-panel .twk-sect:first-child { border-top: 0; margin-top: 0; padding-top: 8px !important; }
+  .twk-panel .twk-lbl,
+  .twk-panel .twk-lbl > span:first-child {
+    color: rgba(255, 255, 255, 0.85) !important;
+  }
+  .twk-panel .twk-val { color: rgba(255, 255, 255, 0.5) !important; }
+  .twk-panel .twk-field {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    color: rgba(255, 255, 255, 0.92) !important;
+    height: 30px !important;
+    border-radius: 8px !important;
+  }
+  .twk-panel .twk-field:focus {
+    border-color: #9DC9E8 !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+    box-shadow: 0 0 0 3px rgba(157, 201, 232, 0.12) !important;
+  }
+  .twk-panel select.twk-field {
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%239DC9E8' d='M0 0h10L5 6z'/></svg>") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 10px center !important;
+  }
+  .twk-panel .twk-seg {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .twk-panel .twk-seg-thumb {
+    background: linear-gradient(180deg, #9DC9E8, #7FB6DC) !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset !important;
+  }
+  .twk-panel .twk-seg button { color: rgba(255, 255, 255, 0.6) !important; font-weight: 600 !important; }
+  .twk-panel .twk-seg button[aria-checked="true"] { color: #000 !important; }
+  .twk-panel .twk-slider {
+    background: rgba(255, 255, 255, 0.08) !important;
+  }
+  .twk-panel .twk-slider::-webkit-slider-thumb {
+    background: #9DC9E8 !important;
+    border: 0 !important;
+    box-shadow: 0 0 0 4px rgba(157, 201, 232, 0.15), 0 2px 6px rgba(0, 0, 0, 0.4) !important;
+  }
+  .twk-panel .twk-slider::-moz-range-thumb {
+    background: #9DC9E8 !important;
+    border: 0 !important;
+  }
+  .twk-panel .twk-toggle {
+    background: rgba(255, 255, 255, 0.1) !important;
+  }
+  .twk-panel .twk-toggle[aria-checked="true"] {
+    background: #9DC9E8 !important;
+  }
+  .twk-panel .twk-toggle .twk-toggle-thumb,
+  .twk-panel .twk-toggle > span {
+    background: #fff !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4) !important;
+  }
+  .twk-panel .twk-chip {
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    box-shadow: 0 0 0 2px transparent !important;
+  }
+  .twk-panel .twk-chip[aria-checked="true"] {
+    border-color: #9DC9E8 !important;
+    box-shadow: 0 0 0 2px rgba(157, 201, 232, 0.35) !important;
+  }
+  .twk-panel .twk-btn {
+    background: linear-gradient(180deg, #9DC9E8, #7FB6DC) !important;
+    color: #000 !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    box-shadow: 0 4px 14px rgba(157, 201, 232, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.06) inset !important;
+    transition: transform .08s ease, box-shadow .15s ease;
+  }
+  .twk-panel .twk-btn:hover {
+    box-shadow: 0 6px 20px rgba(157, 201, 232, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.1) inset !important;
+    transform: translateY(-1px);
+  }
+  .twk-panel .twk-btn.secondary {
+    background: rgba(255, 255, 255, 0.06) !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset !important;
+    flex: 1;
+  }
+  .twk-panel .twk-btn.secondary:hover {
+    background: rgba(157, 201, 232, 0.12) !important;
+    color: #fff !important;
+    box-shadow: 0 0 0 1px rgba(157, 201, 232, 0.3) inset !important;
+  }
+  /* Tip block */
+  .twk-tip {
+    background: rgba(157, 201, 232, 0.06) !important;
+    border: 1px solid rgba(157, 201, 232, 0.12) !important;
+    border-radius: 8px;
+    padding: 10px 12px !important;
+    color: rgba(255, 255, 255, 0.72) !important;
+    line-height: 1.55;
+  }
+  .twk-tip b { color: #9DC9E8 !important; font-weight: 600; }
+
+  /* Footer attribution */
+  .twk-footer {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 500;
+  }
+
+  /* Standalone toggle button — match dark theme */
+  #__standalone-tweaks-btn {
+    background: linear-gradient(180deg, #9DC9E8, #7FB6DC) !important;
+    color: #000 !important;
+    box-shadow:
+      0 6px 24px rgba(157, 201, 232, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.12) inset !important;
+  }
+  #__standalone-tweaks-btn:hover {
+    background: linear-gradient(180deg, #BCE0F2, #9DC9E8) !important;
+  }
+
+  /* ─── Datasheet card — FIXED physical cm dimensions (WYSIWYG with PDF) ─ */
+  .datasheet {
+    --accent: #F39200;
+    --w-cm: 10;
+    --h-cm: 9.5;
+    --safe-width: 65%;
+    container-type: inline-size;
+    position: relative;
+    width: calc(var(--w-cm) * 1cm);
+    height: calc(var(--h-cm) * 1cm);
+    background: #fff;
+    overflow: hidden;
+    padding: 5mm 5mm;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 30px 80px -30px rgba(0,0,0,.25), 0 1px 0 rgba(0,0,0,.04);
+  }
+  .stage[data-zoom] { transform-origin: center; }
+  .datasheet.is-wide {
+    --w-cm: 20;
+    --h-cm: 9.5;
+    --safe-width: 82%;
+  }
+
+  /* Body — expands full width; individual sections constrain themselves
+     so each row stays clear of the triangle at its own y. */
+  .ds-body {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding-bottom: 32mm;
+  }
+  .datasheet.is-wide .ds-body { padding-bottom: 32mm; }
+  .ds-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .datasheet.is-wide .ds-main { justify-content: center; }
+
+  /* Header — occupies almost full width; triangle is just a point
+     at top-right, so title rarely needs to wrap. */
+  .ds-header { position: relative; z-index: 2; width: 92%; }
+  .datasheet.is-wide .ds-header { width: 95%; }
+  .ds-title {
+    display: block;
+    font-family: "Roboto", sans-serif;
+    font-weight: 900;
+    font-size: 5.5mm;
+    line-height: 1.02;
+    letter-spacing: -0.01em;
+    color: #111;
+    margin-bottom: 1mm;
+    text-transform: uppercase;
+  }
+  .ds-subtitle {
+    display: block;
+    font-family: "Roboto", sans-serif;
+    font-weight: 400;
+    font-size: 3.4mm;
+    line-height: 1.2;
+    color: var(--accent);
+  }
+  .datasheet.is-wide .ds-title { font-size: 7mm; }
+  .datasheet.is-wide .ds-subtitle { font-size: 4mm; }
+
+  /* Spec rows — single column tall, two columns wide */
+  .ds-specs {
+    position: relative;
+    z-index: 2;
+    margin-top: 3mm;
+    display: flex;
+    flex-direction: column;
+    gap: 1mm;
+    width: var(--safe-width);  /* widest column-set that fits left of the triangle's bottom edge */
+  }
+  .datasheet.is-wide .ds-specs {
+    display: grid;
+    grid-template-rows: repeat(3, auto);
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    column-gap: 10mm;
+    row-gap: 2.5mm;
+    width: var(--safe-width);
+  }
+  .spec-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .spec-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: 1;
+    min-width: 0;
+  }
+  .spec-icon {
+    appearance: none;
+    border: 0.4mm dashed transparent;
+    background: transparent;
+    width: 6mm;
+    height: 6mm;
+    padding: 0.4mm;
+    color: #111;
+    cursor: pointer;
+    border-radius: 1.2mm;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .datasheet.is-wide .spec-icon { width: 7mm; height: 7mm; }
+  .spec-icon:hover { border-color: rgba(0,0,0,.18); background: rgba(0,0,0,.02); }
+  .spec-icon svg { width: 100%; height: 100%; display: block; }
+  .spec-row { gap: 2.5mm; }
+  .spec-text {
+    font-family: "Roboto", sans-serif;
+    font-size: 3.2mm;
+    font-weight: 300;
+    color: #111;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .datasheet.is-wide .spec-text { font-size: 3.8mm; }
+
+  /* Row hover controls */
+  .spec-remove {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: rgba(0,0,0,.35);
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .15s ease, background .15s ease, color .15s ease;
+    margin-left: 6px;
+  }
+  .spec-wrap:hover .spec-remove { opacity: 1; }
+  .spec-remove:hover { background: rgba(0,0,0,.06); color: #111; }
+
+  .spec-add {
+    align-self: flex-start;
+    appearance: none;
+    border: 1px dashed rgba(0,0,0,.18);
+    background: transparent;
+    color: rgba(0,0,0,.5);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .datasheet:hover .spec-add { opacity: 1; }
+  .spec-add:hover { color: #111; border-color: rgba(0,0,0,.4); }
+
+  /* QR block — anchored bottom-left, aligned with title's left edge. */
+  .ds-qr {
+    position: absolute;
+    left: 5mm;
+    bottom: 5mm;
+    z-index: 2;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1mm;
+  }
+  /* On the wide card the QR sits at bottom-left aligned with everything else */
+  .qr-frame {
+    position: relative;
+    padding: 1.2mm;
+    width: 24mm;
+    height: 24mm;
+    display: grid;
+    place-items: center;
+  }
+  .qr-frame svg { width: 100%; height: 100%; }
+  .datasheet.is-wide .qr-frame { width: 26mm; height: 26mm; }
+  .qr-bracket {
+    position: absolute;
+    width: 3.2mm;
+    height: 3.2mm;
+    border: 0.6mm solid var(--accent);
+  }
+  .qr-tl { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+  .qr-tr { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+  .qr-bl { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+  .qr-br { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+  .qr-label {
+    font-size: 2.3mm;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #111;
+    white-space: nowrap;
+  }
+
+  /* Side triangle — SVG so html2canvas renders it correctly in PDF.
+     CMYK 0/45/100/0 ≈ #FF8C00 RGB. */
+  /* Side triangle — same angle on every ratio (slope dx/dy = 0.4).
+     Full height, corner to corner. */
+  .ds-triangle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: calc(var(--h-cm) * 1cm * 0.4);
+    height: calc(var(--h-cm) * 1cm);
+    z-index: 1;
+    pointer-events: none;
+    display: block;
+  }
+  svg.ds-triangle {
+    width: calc(var(--h-cm) * 1cm * 0.4);
+    height: calc(var(--h-cm) * 1cm);
+  }
+
+  /* ─── Editable text ────────────────────────────────────────── */
+  .editable {
+    outline: none;
+    border-radius: 3px;
+    transition: background .15s ease, box-shadow .15s ease;
+    cursor: text;
+    -webkit-user-modify: read-write-plaintext-only;
+  }
+  .editable:hover { background: rgba(0,0,0,.04); }
+  .editable:focus { background: rgba(0,0,0,.05); box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+  .editable:empty::before {
+    content: attr(data-placeholder);
+    color: rgba(0,0,0,.3);
+  }
+
+  /* ─── Icon picker popover (dark) ──────────────────────────── */
+  .icon-picker {
+    width: 296px;
+    z-index: 2147483647;
+    background: rgba(18, 19, 23, 0.96);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(157, 201, 232, 0.08);
+    padding: 10px;
+    transform: scale(var(--dc-inv-zoom, 1));
+    transform-origin: top left;
+    max-height: 460px;
+    overflow-y: auto;
+    color: #fff;
+  }
+  .icon-picker-hd {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #9DC9E8;
+    padding: 4px 6px 8px;
+  }
+  .icon-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
+  }
+  .icon-tile {
+    appearance: none;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    padding: 4px 2px 3px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    color: rgba(255, 255, 255, 0.92);
+    position: relative;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .icon-tile:hover { background: rgba(157, 201, 232, 0.1); }
+  .icon-tile.is-active {
+    border-color: #9DC9E8;
+    background: rgba(157, 201, 232, 0.14);
+  }
+  .icon-tile-svg { width: 22px; height: 22px; display: grid; place-items: center; color: #fff; }
+  .icon-tile-svg svg { width: 100%; height: 100%; display: block; }
+  .icon-tile-label {
+    font-size: 8.5px;
+    color: rgba(255, 255, 255, 0.55);
+    text-align: center;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+  }
+  .icon-tile-add {
+    border: 1px dashed rgba(157, 201, 232, 0.35);
+    color: #9DC9E8;
+    background: transparent;
+  }
+  .icon-tile-add:hover {
+    border-color: #9DC9E8;
+    background: rgba(157, 201, 232, 0.08);
+    color: #fff;
+  }
+  .icon-tile-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+    line-height: 13px;
+    text-align: center;
+    opacity: 0;
+    transition: opacity .12s ease, background .12s ease;
+  }
+  .icon-tile.is-custom:hover .icon-tile-remove { opacity: 1; }
+  .icon-tile-remove:hover { background: #9DC9E8; color: #000; }
+
+  .icon-picker-tip {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(157, 201, 232, 0.06);
+    border: 1px solid rgba(157, 201, 232, 0.12);
+    border-radius: 8px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.72);
+    line-height: 1.45;
+  }
+  .icon-picker-tip-hd {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .icon-picker-tip-body code {
+    background: rgba(255, 255, 255, 0.08);
+    color: #9DC9E8;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 10px;
+  }
+  .icon-picker-copy {
+    appearance: none;
+    border: 0;
+    background: linear-gradient(180deg, #9DC9E8, #7FB6DC);
+    color: #000;
+    font: 700 10px/1 "Inter", "Roboto", inherit;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    letter-spacing: .04em;
+    transition: transform .08s ease;
+  }
+  .icon-picker-copy:hover { transform: translateY(-1px); }
+
+  /* ─── Print styles (used by the in-app "Download as PDF" button) ─ */
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html, body {
+      background: #fff !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      display: block !important;
+      min-height: 0 !important;
+    }
+    .datasheet {
+      margin: 0 !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    /* Strip editor chrome from print output */
+    .twk-panel, .icon-picker, .spec-remove, .spec-add { display: none !important; }
+    .editable { background: transparent !important; box-shadow: none !important; }
+    .spec-icon { border-color: transparent !important; background: transparent !important; }
+  }
+
+  /* Tweaks tip block */
+  .twk-tip {
+    font-size: 11px;
+    color: rgba(41,38,27,.7);
+    line-height: 1.55;
+    padding: 2px 0;
+  }
+  .twk-tip b { color: #29261b; font-weight: 600; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
