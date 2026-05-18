@@ -10,11 +10,11 @@ const DEFAULTS = /*EDITMODE-BEGIN*/{
   "ratio": "10:10",
   "bleed": false,
   "specs": [
-    {"icon": "voltage_18v_li_ion",   "text": "18 Volt Li-Ion"},
-    {"icon": "torque_40nm",          "text": "75 Nm"},
-    {"icon": "no_load_speed",        "text": "30.000 bpm"},
-    {"icon": "powerful_motor_1020w", "text": "Brushless Motor"},
-    {"icon": "keyless_chuck_13mm",   "text": "13 mm Keyless"}
+    {"icon": "j11",  "text": "18 Volt Li-Ion"},
+    {"icon": "a17",  "text": "75 Nm"},
+    {"icon": "a10",  "text": "30.000 bpm"},
+    {"icon": "a24",  "text": "Brushless Motor"},
+    {"icon": "e5",   "text": "13 mm Keyless"}
   ],
   "qrUrl": "https://example.com/product",
   "qrLabel": "SCAN ME",
@@ -164,21 +164,44 @@ const ICON_PROMPT =
 function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIcons }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
+  const searchRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     document.addEventListener("mousedown", onDown);
+    // Auto-focus the search input
+    setTimeout(() => searchRef.current?.focus(), 0);
     return () => document.removeEventListener("mousedown", onDown);
   }, [onClose]);
 
   const rect = anchor?.getBoundingClientRect();
-  const PW = 320, PH = 380;
+  const PW = 320, PH = 480;
   const style = rect ? {
     position: "fixed",
     top: Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - PH - 8)),
     left: Math.max(8, Math.min(rect.left, window.innerWidth - PW - 8)),
   } : {};
+
+  // Group the built-in library by category, filtered by the search query.
+  const q = query.trim().toLowerCase();
+  const allEntries = Object.entries(window.ICON_LIBRARY || {});
+  const matches = q
+    ? allEntries.filter(([key, ic]) =>
+        key.toLowerCase().includes(q) || (ic.label || "").toLowerCase().includes(q))
+    : allEntries;
+  const groups = (window.ICON_CATEGORIES || []).map(cat => ({
+    id: cat.id,
+    label: cat.label,
+    items: matches.filter(([_, ic]) => ic.category === cat.id),
+  })).filter(g => g.items.length > 0);
+  // Custom icons + uncategorised built-ins fall under a final group.
+  const uncategorised = matches.filter(([_, ic]) => !ic.category);
+  const customMatches = q
+    ? (customIcons || []).filter(c =>
+        (c.key || "").toLowerCase().includes(q) || (c.label || "").toLowerCase().includes(q))
+    : (customIcons || []);
 
   const copyPrompt = async () => {
     try { await navigator.clipboard.writeText(ICON_PROMPT); }
@@ -220,61 +243,101 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
 
   // Portal to document.body so the .stage CSS transform doesn't change our
   // fixed-position containing block.
+  const renderTile = (key, ic, isCustom = false) => (
+    <button
+      key={key}
+      className={`icon-tile ${isCustom ? "is-custom " : ""}${key === value ? "is-active" : ""}`}
+      title={ic.label || key}
+      onClick={() => { onChange(key); onClose(); }}
+    >
+      <span className="icon-tile-svg" dangerouslySetInnerHTML={{ __html: ic.svg }} />
+      <span className="icon-tile-label">{ic.label || key}</span>
+      {isCustom && (
+        <span
+          className="icon-tile-remove"
+          title="Remove this icon"
+          onClick={(e) => removeCustom(key, e)}
+        >×</span>
+      )}
+    </button>
+  );
+
+  const totalMatches = groups.reduce((n, g) => n + g.items.length, 0) + uncategorised.length + customMatches.length;
+
   return ReactDOM.createPortal(
     <div ref={ref} className="icon-picker" style={style}>
       <div className="icon-picker-hd">Choose icon</div>
-
-      <div className="icon-picker-grid">
-        {Object.entries(window.ICON_LIBRARY).map(([key, { label, svg }]) => (
-          <button
-            key={key}
-            className={`icon-tile ${key === value ? "is-active" : ""}`}
-            title={label}
-            onClick={() => { onChange(key); onClose(); }}
-          >
-            <span className="icon-tile-svg" dangerouslySetInnerHTML={{ __html: svg }} />
-            <span className="icon-tile-label">{label}</span>
-          </button>
-        ))}
-        {(customIcons || []).map(({ key, label, svg }) => (
-          <button
-            key={key}
-            className={`icon-tile is-custom ${key === value ? "is-active" : ""}`}
-            title={label}
-            onClick={() => { onChange(key); onClose(); }}
-          >
-            <span
-              className="icon-tile-svg"
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
-            <span className="icon-tile-label">{label}</span>
-            <span
-              className="icon-tile-remove"
-              title="Remove this icon"
-              onClick={(e) => removeCustom(key, e)}
-            >×</span>
-          </button>
-        ))}
-        <button
-          className="icon-tile icon-tile-add"
-          title="Upload an SVG"
-          onClick={() => fileRef.current?.click()}
-        >
-          <span className="icon-tile-svg">
-            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="16" y1="6" x2="16" y2="26" />
-              <line x1="6" y1="16" x2="26" y2="16" />
-            </svg>
-          </span>
-          <span className="icon-tile-label">Upload</span>
-        </button>
+      <div className="icon-picker-search">
         <input
-          ref={fileRef}
-          type="file"
-          accept=".svg,image/svg+xml"
-          style={{ display: "none" }}
-          onChange={onPickFile}
+          ref={searchRef}
+          type="text"
+          className="icon-picker-search-field"
+          placeholder="Search icons…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
         />
+        {query && (
+          <button className="icon-picker-search-clear" onClick={() => setQuery("")} title="Clear">×</button>
+        )}
+      </div>
+
+      <div className="icon-picker-scroll">
+        {totalMatches === 0 && (
+          <div className="icon-picker-empty">No icons match "{query}". Try a different term, or upload your own below.</div>
+        )}
+
+        {customMatches.length > 0 && (
+          <div className="icon-picker-group">
+            <div className="icon-picker-group-hd">Your icons</div>
+            <div className="icon-picker-grid">
+              {customMatches.map(c => renderTile(c.key, c, true))}
+            </div>
+          </div>
+        )}
+
+        {groups.map(g => (
+          <div key={g.id} className="icon-picker-group">
+            <div className="icon-picker-group-hd">{g.label}</div>
+            <div className="icon-picker-grid">
+              {g.items.map(([key, ic]) => renderTile(key, ic))}
+            </div>
+          </div>
+        ))}
+
+        {uncategorised.length > 0 && (
+          <div className="icon-picker-group">
+            <div className="icon-picker-group-hd">Other</div>
+            <div className="icon-picker-grid">
+              {uncategorised.map(([key, ic]) => renderTile(key, ic))}
+            </div>
+          </div>
+        )}
+
+        <div className="icon-picker-group">
+          <div className="icon-picker-group-hd">Upload</div>
+          <div className="icon-picker-grid">
+            <button
+              className="icon-tile icon-tile-add"
+              title="Upload an SVG"
+              onClick={() => fileRef.current?.click()}
+            >
+              <span className="icon-tile-svg">
+                <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="16" y1="6" x2="16" y2="26" />
+                  <line x1="6" y1="16" x2="26" y2="16" />
+                </svg>
+              </span>
+              <span className="icon-tile-label">Upload SVG</span>
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".svg,image/svg+xml"
+              style={{ display: "none" }}
+              onChange={onPickFile}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="icon-picker-tip">
