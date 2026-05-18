@@ -1129,6 +1129,17 @@ function App() {
       const stage = stageRef.current;
       const card = cardRef.current;
       if (!stage || !card) return;
+      // Clear any inline sizing from a previous fit() pass FIRST — otherwise
+      // offsetWidth keeps returning the previous run's pixel value and the
+      // canvas appears stuck on the old ratio until the page reloads.
+      card.style.width = "";
+      card.style.height = "";
+      card.style.transform = "";
+      card.style.zoom = "";
+      stage.style.zoom = "";
+      stage.style.transform = "";
+      stage.style.width = "";
+      stage.style.height = "";
       const isMobile = window.matchMedia("(max-width: 768px)").matches;
       // Desktop reserves a 320px right gutter for the Tweaks panel.
       // Mobile uses a fixed 30vh canvas viewport.
@@ -1174,7 +1185,7 @@ function App() {
     if (cardRef.current) ro.observe(cardRef.current);
     window.addEventListener("resize", fit);
     return () => { window.removeEventListener("resize", fit); ro.disconnect(); };
-  }, [t.ratio]);
+  }, [t.ratio, t.bleed]);
 
   return (
     <>
