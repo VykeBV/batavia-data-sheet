@@ -569,25 +569,28 @@ function App() {
   }, [t]);
 
   const csvInputRef = useRef(null);
-  const batchInputRef = useRef(null);
 
+  // Import CSV — each row becomes a new page appended to the deck.
+  // (Old single-row "replace current page" + the auto-export "Batch → PDF"
+  // flows are merged into this one: load pages, let the user review and
+  // edit, then click Export all when ready.)
   const importCsv = useCallback((file) => {
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const rows = parseCsv(String(reader.result || ""));
-        if (!rows.length) { alert("CSV is empty."); return; }
-        if (rows.length > 1) {
-          alert(`This CSV has ${rows.length} entries. Use "Batch → PDF" to generate a multi-page PDF, or this will only load the first row.`);
-        }
-        const patch = rowToPartialState(rows[0]);
-        Object.keys(patch).forEach(k => setTweak(k, patch[k]));
+        if (!rows.length) { alert("CSV had no data rows."); return; }
+        const newPages = rows.map(row => ({ ...DEFAULTS, ...rowToPartialState(row) }));
+        setAppState(prev => ({
+          pages: [...prev.pages, ...newPages],
+          activeIndex: prev.pages.length,  // jump to the first imported page
+        }));
       } catch (e) {
         alert("Could not load CSV: " + e.message);
       }
     };
     reader.readAsText(file);
-  }, [setTweak]);
+  }, []);
 
   const resetState = useCallback(() => {
     if (!window.confirm("Reset this page to the default datasheet?")) return;
@@ -1050,54 +1053,6 @@ function App() {
     });
   }, [pages, activeIndex, captureCardIntoPdf]);
 
-  // ── Batch: CSV with N rows → N-page PDF ─────────────────────────────
-  const batchPdf = useCallback(async (file) => {
-    if (!window.html2canvas || !window.jspdf) {
-      alert("PDF libraries are still loading—please try again in a moment.");
-      return;
-    }
-    const text = await file.text();
-    const rows = parseCsv(text);
-    if (!rows.length) { alert("CSV is empty."); return; }
-
-    const snapshot = JSON.parse(JSON.stringify(tRef.current));
-    await withStageNeutral(async () => {
-      try {
-        const { jsPDF } = window.jspdf;
-        let pdf = null;
-        for (let i = 0; i < rows.length; i++) {
-          setBatchProgress({ i: i + 1, n: rows.length });
-          const patch = rowToPartialState(rows[i]);
-          const merged = { ...snapshot, ...patch };
-          // Apply patch
-          Object.keys(patch).forEach(k => setTweak(k, patch[k]));
-          await waitForRender(280);
-          const [w, h] = merged.ratio.split(":").map(Number);
-          const bleedCm = merged.bleed ? 0.3 : 0;
-          const pageW = w + 2 * bleedCm;
-          const pageH = h + 2 * bleedCm;
-          if (!pdf) {
-            pdf = new jsPDF({
-              orientation: pageW >= pageH ? "landscape" : "portrait",
-              unit: "cm", format: [pageW, pageH], compress: true,
-            });
-          } else {
-            pdf.addPage([pageW, pageH], pageW >= pageH ? "landscape" : "portrait");
-          }
-          await captureCardIntoPdf(pdf, merged);
-        }
-        pdf.save(`datasheets-batch-${rows.length}p.pdf`);
-      } catch (e) {
-        console.error("Batch PDF failed:", e);
-        alert("Batch PDF failed: " + (e?.message || e));
-      } finally {
-        // Restore
-        Object.keys(snapshot).forEach(k => setTweak(k, snapshot[k]));
-        setBatchProgress(null);
-      }
-    });
-  }, [captureCardIntoPdf, setTweak]);
-
   // ── Auto-fit screen zoom so the cm-sized card is comfortably viewable ──
   const stageRef = useRef(null);
   const cardRef = useRef(null);
@@ -1255,6 +1210,11 @@ function App() {
           <TweakButton secondary label="+ Add page" onClick={() => addPage()} />
           <TweakButton secondary label="Duplicate" onClick={() => addPage({ duplicate: true })} />
         </div>
+        <TweakButton
+          secondary
+          label="Import CSV → pages"
+          onClick={() => csvInputRef.current?.click()}
+        />
 
         <TweakSection label="Format" />
         <TweakRadio
@@ -1333,15 +1293,7 @@ function App() {
             onClick={exportAllPages}
           />
         )}
-        <div style={{ display: "flex", gap: "6px" }}>
-          <TweakButton label="Export CSV" onClick={exportCsv} secondary />
-          <TweakButton label="Import CSV" onClick={() => csvInputRef.current?.click()} secondary />
-        </div>
-        <TweakButton
-          label={batchProgress ? `Batch… ${batchProgress.i}/${batchProgress.n}` : "Batch CSV → multi-page PDF"}
-          onClick={() => batchInputRef.current?.click()}
-          secondary
-        />
+        <TweakButton label="Export CSV" onClick={exportCsv} secondary />
         <TweakButton label="Reset to defaults" onClick={resetState} secondary />
         <input
           ref={csvInputRef}
@@ -1352,17 +1304,6 @@ function App() {
             const f = e.target.files?.[0];
             e.target.value = "";
             if (f) importCsv(f);
-          }}
-        />
-        <input
-          ref={batchInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          style={{ display: "none" }}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            e.target.value = "";
-            if (f) batchPdf(f);
           }}
         />
 
