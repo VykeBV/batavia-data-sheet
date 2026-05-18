@@ -4,8 +4,18 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Product Data Sheet Template</title>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
 <style>
+  /* Roboto variable font — Regular (400) + Black (900) used; the file
+     covers 100–900 so other weights in the UI fall back to it cleanly.
+     SIL Open Font License — see /fonts/OFL.txt */
+  @font-face {
+    font-family: "Roboto";
+    src: url("fonts/Roboto-VariableFont.ttf") format("truetype-variations"),
+         url("fonts/Roboto-VariableFont.ttf") format("truetype");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
@@ -338,7 +348,7 @@
   .spec-text {
     font-family: "Roboto", sans-serif;
     font-size: 3.2mm;
-    font-weight: 300;
+    font-weight: 400;
     color: #111;
     line-height: 1.2;
     white-space: nowrap;
@@ -414,8 +424,9 @@
   .qr-bl { bottom: 0; left: 0; border-right: 0; border-top: 0; }
   .qr-br { bottom: 0; right: 0; border-left: 0; border-top: 0; }
   .qr-label {
+    font-family: "Roboto", sans-serif;
     font-size: 2.3mm;
-    font-weight: 600;
+    font-weight: 400;
     letter-spacing: 0.08em;
     color: #111;
     white-space: nowrap;
