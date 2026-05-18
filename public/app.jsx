@@ -4,19 +4,17 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 // ─── Defaults (editable via Tweaks; persisted to file on change) ──────────────
 const DEFAULTS = /*EDITMODE-BEGIN*/{
-  "title": "BRUSHLESS COMBI DRILL",
-  "subtitle": "18V Maxxpack Collection",
+  "title": "",
+  "subtitle": "",
   "accent": "#FF8C00",
   "ratio": "10:10",
   "bleed": false,
   "specs": [
-    {"icon": "j11",  "text": "18 Volt Li-Ion"},
-    {"icon": "a17",  "text": "75 Nm"},
-    {"icon": "a10",  "text": "30.000 bpm"},
-    {"icon": "a24",  "text": "Brushless Motor"},
-    {"icon": "e5",   "text": "13 mm Keyless"}
+    {"icon": "j11", "text": ""},
+    {"icon": "a17", "text": ""},
+    {"icon": "a10", "text": ""}
   ],
-  "qrUrl": "https://example.com/product",
+  "qrUrl": "https://example.com",
   "qrLabel": "SCAN ME",
   "showTriangle": true,
   "showQr": true,
@@ -383,7 +381,7 @@ function SpecRow({ spec, onChange, customIcons, setCustomIcons }) {
         className="spec-text"
         value={spec.text}
         onChange={(text) => onChange({ ...spec, text })}
-        placeholder="Specification"
+        placeholder="Icon text"
       />
       {picking && (
         <IconPicker
@@ -656,9 +654,10 @@ function App() {
   }, []);
 
   const resetState = useCallback(() => {
-    if (!window.confirm("Reset this page to the default datasheet?")) return;
-    setTweak(DEFAULTS);
-  }, [setTweak]);
+    if (!window.confirm("Reset everything? This removes every page and clears all content.")) return;
+    setAppState({ pages: [{ ...DEFAULTS }], activeIndex: 0 });
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  }, []);
 
   // ── Capture the .datasheet DOM into an existing jsPDF page ──────
   //    Reusable for single export, batch export, and any callers.
@@ -1013,6 +1012,8 @@ function App() {
       cT: card ? card.style.transform : "",
       cO: card ? card.style.transformOrigin : "",
       cZ: card ? card.style.zoom : "",
+      cW: card ? card.style.width : "",
+      cH: card ? card.style.height : "",
     };
     if (stage) {
       stage.style.transform = "none";
@@ -1024,6 +1025,8 @@ function App() {
       card.style.transform = "none";
       card.style.transformOrigin = "";
       card.style.zoom = "1";
+      card.style.width = "";
+      card.style.height = "";
     }
     try { return await fn(); }
     finally {
@@ -1037,6 +1040,8 @@ function App() {
         card.style.transform = prev.cT;
         card.style.transformOrigin = prev.cO;
         card.style.zoom = prev.cZ;
+        card.style.width = prev.cW;
+        card.style.height = prev.cH;
       }
     }
   };
@@ -1135,16 +1140,21 @@ function App() {
       if (cw === 0 || ch === 0) return;
       const scale = Math.min(avW / cw, avH / ch, maxScale);
       if (isMobile) {
-        // Mobile: stage is a fixed 30vh flex container (CSS); scale the card
-        // via zoom so the layout reflects the scaled size and text stays
-        // crisp (transform: scale on the stage was causing GPU-rasterised
-        // blur during hover transitions on children).
+        // Mobile: stage is a fixed 30vh flex container with overflow: hidden
+        // (CSS). Scale the card via transform — works in every browser
+        // including iOS Safari inside Webflow's iframe, which has been
+        // ignoring CSS `zoom` and letting the card render at full cm size.
+        // Explicit width/height in px set the layout box so flex centring
+        // computes against the unscaled box; the visible scaled card stays
+        // centred inside the 30vh region.
         stage.style.transform = "";
         stage.style.width = "";
         stage.style.height = "";
-        card.style.transform = "";
-        card.style.transformOrigin = "";
-        card.style.zoom = scale;
+        card.style.zoom = "";
+        card.style.width = cw + "px";
+        card.style.height = ch + "px";
+        card.style.transformOrigin = "center";
+        card.style.transform = `scale(${scale})`;
       } else {
         // Desktop: zoom on the stage. Unlike transform: scale this causes a
         // real layout pass so children rasterise at the final pixel size —
@@ -1181,13 +1191,13 @@ function App() {
               className="ds-title"
               value={t.title}
               onChange={(v) => setTweak("title", v)}
-              placeholder="PRODUCT NAME"
+              placeholder="Title"
             />
             <Editable
               className="ds-subtitle"
               value={t.subtitle}
               onChange={(v) => setTweak("subtitle", v)}
-              placeholder="Subtitle / collection"
+              placeholder="Tag line"
             />
           </div>
 
