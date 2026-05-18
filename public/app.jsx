@@ -931,17 +931,21 @@ function App() {
       stT: stage ? stage.style.transform : "",
       stW: stage ? stage.style.width : "",
       stH: stage ? stage.style.height : "",
+      stZ: stage ? stage.style.zoom : "",
       cT: card ? card.style.transform : "",
       cO: card ? card.style.transformOrigin : "",
+      cZ: card ? card.style.zoom : "",
     };
     if (stage) {
       stage.style.transform = "none";
       stage.style.width = "auto";
       stage.style.height = "auto";
+      stage.style.zoom = "1";
     }
     if (card) {
       card.style.transform = "none";
       card.style.transformOrigin = "";
+      card.style.zoom = "1";
     }
     try { return await fn(); }
     finally {
@@ -949,10 +953,12 @@ function App() {
         stage.style.transform = prev.stT;
         stage.style.width = prev.stW;
         stage.style.height = prev.stH;
+        stage.style.zoom = prev.stZ;
       }
       if (card) {
         card.style.transform = prev.cT;
         card.style.transformOrigin = prev.cO;
+        card.style.zoom = prev.cZ;
       }
     }
   };
@@ -1046,21 +1052,28 @@ function App() {
       if (cw === 0 || ch === 0) return;
       const scale = Math.min(avW / cw, avH / ch, maxScale);
       if (isMobile) {
-        // Mobile: stage is a fixed flex container (CSS); scale the card directly,
-        // leaving the stage's box untouched so the fixed 30vh region stays fixed.
+        // Mobile: stage is a fixed 30vh flex container (CSS); scale the card
+        // via zoom so the layout reflects the scaled size and text stays
+        // crisp (transform: scale on the stage was causing GPU-rasterised
+        // blur during hover transitions on children).
         stage.style.transform = "";
         stage.style.width = "";
         stage.style.height = "";
-        card.style.transform = `scale(${scale})`;
-        card.style.transformOrigin = "center";
-      } else {
-        // Desktop: scale the stage (centered transform-origin), box stays at the
-        // unscaled card size so the layout extent matches the visible card.
         card.style.transform = "";
         card.style.transformOrigin = "";
-        stage.style.transform = `scale(${scale})`;
-        stage.style.width = cw + "px";
-        stage.style.height = ch + "px";
+        card.style.zoom = scale;
+      } else {
+        // Desktop: zoom on the stage. Unlike transform: scale this causes a
+        // real layout pass so children rasterise at the final pixel size —
+        // no blur, no hover-flicker. The layout box already matches the
+        // visible card so flex centring works naturally.
+        card.style.transform = "";
+        card.style.transformOrigin = "";
+        card.style.zoom = "";
+        stage.style.transform = "";
+        stage.style.width = "";
+        stage.style.height = "";
+        stage.style.zoom = scale;
       }
     };
     fit();

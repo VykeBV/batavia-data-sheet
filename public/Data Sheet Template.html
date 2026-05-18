@@ -926,10 +926,14 @@
     if (root && "MutationObserver" in window) {
       new MutationObserver(syncFab).observe(root, { childList: true, subtree: true });
     }
-    setTimeout(function () {
+    // Auto-open: keep trying until the Tweaks panel appears (React may not
+    // have mounted by the time the first attempt fires on slow networks).
+    var openTries = 0;
+    var openTimer = setInterval(function () {
+      if (document.querySelector(".twk-panel")) { clearInterval(openTimer); return; }
       window.postMessage({ type: "__activate_edit_mode" }, "*");
-      setTimeout(syncFab, 100);
-    }, 400);
+      if (++openTries >= 25) clearInterval(openTimer);  // ~5s ceiling
+    }, 200);
   })();
 
   (function () {
