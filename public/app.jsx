@@ -9,11 +9,11 @@ const DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "#FF8C00",
   "ratio": "10:9.5",
   "specs": [
-    {"icon": "battery", "text": "18 Volt Li-Ion"},
-    {"icon": "torque",  "text": "75 Nm"},
-    {"icon": "hammer",  "text": "30.000 bpm"},
-    {"icon": "motor",   "text": "Brushless Motor"},
-    {"icon": "chuck",   "text": "13 mm Keyless"}
+    {"icon": "voltage_18v_li_ion",   "text": "18 Volt Li-Ion"},
+    {"icon": "torque_40nm",          "text": "75 Nm"},
+    {"icon": "no_load_speed",        "text": "30.000 bpm"},
+    {"icon": "powerful_motor_1020w", "text": "Brushless Motor"},
+    {"icon": "keyless_chuck_13mm",   "text": "13 mm Keyless"}
   ],
   "qrUrl": "https://example.com/product",
   "qrLabel": "SCAN ME",
@@ -231,7 +231,7 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
             title={label}
             onClick={() => { onChange(key); onClose(); }}
           >
-            <span className="icon-tile-svg">{svg}</span>
+            <span className="icon-tile-svg" dangerouslySetInnerHTML={{ __html: svg }} />
             <span className="icon-tile-label">{label}</span>
           </button>
         ))}
@@ -299,6 +299,9 @@ function SpecRow({ spec, onChange, customIcons, setCustomIcons }) {
   const btnRef = useRef(null);
   const builtin = window.ICON_LIBRARY[spec.icon];
   const custom = builtin ? null : (customIcons || []).find(ic => ic.key === spec.icon);
+  // Fallback: first icon in the library if neither builtin nor custom matches.
+  const fallback = window.ICON_LIBRARY[Object.keys(window.ICON_LIBRARY)[0]];
+  const svgHtml = (builtin || custom || fallback).svg;
   return (
     <div className="spec-row">
       <button
@@ -307,12 +310,10 @@ function SpecRow({ spec, onChange, customIcons, setCustomIcons }) {
         onClick={() => setPicking(true)}
         title="Click to change icon"
       >
-        {builtin
-          ? builtin.svg
-          : custom
-            ? <span style={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}
-                    dangerouslySetInnerHTML={{ __html: custom.svg }} />
-            : window.ICON_LIBRARY.gear.svg}
+        <span
+          style={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}
+          dangerouslySetInnerHTML={{ __html: svgHtml }}
+        />
       </button>
       <Editable
         className="spec-text"
@@ -601,8 +602,11 @@ function App() {
     })) : [];
 
     // ─── Hide everything we'll redraw as vector ─────────────────────
+    // (Spec icons are kept visible — the new Batavia icon set uses filled
+    // paths, and the SVG-to-jsPDF renderer only strokes, so we let
+    // html2canvas capture them as bitmap instead of stroking outlines.)
     const visEls = [
-      triangleEl, titleEl, subtitleEl, ...specTextEls, ...specIconBtns,
+      triangleEl, titleEl, subtitleEl, ...specTextEls,
       qrSvg, qrLabelEl, ...brackets,
     ].filter(Boolean);
     const prevVisMap = new Map();
@@ -669,73 +673,9 @@ function App() {
         pdf.text(info.text, info.x, baselineCm);
       });
 
-      // ─── 6. Spec icons (CMYK black strokes via SVG → jsPDF) ──────
-      specIconInfos.forEach((info) => {
-        if (!info) return;
-        const svg = info.svg;
-        const vb = (svg.getAttribute("viewBox") || "0 0 32 32").trim().split(/\s+/).map(Number);
-        const [vbX, vbY, vbW, vbH] = vb.length === 4 ? vb : [0, 0, 32, 32];
-        // Match CSS .spec-icon padding (~0.4mm) on each side
-        const pad = 0.04;
-        const ix = info.x + pad;
-        const iy = info.y + pad;
-        const iw = info.w - 2 * pad;
-        const ih = info.h - 2 * pad;
-        const sx = iw / vbW, sy = ih / vbH;
-        const T = (px, py) => [ix + (px - vbX) * sx, iy + (py - vbY) * sy];
-        const swPx = parseFloat(svg.getAttribute("stroke-width") || "2");
-        const sw = swPx * sx;  // cm
-        setBlackStroke();
-        pdf.setLineWidth(sw);
-        pdf.setLineCap("round");
-        pdf.setLineJoin("round");
-        const drawChildren = (parent) => {
-          for (const child of parent.children) {
-            const tag = child.tagName.toLowerCase();
-            if (tag === "g") { drawChildren(child); continue; }
-            const fillAttr = child.getAttribute("fill");
-            const isFilled = fillAttr && fillAttr !== "none" && !/url\(/.test(fillAttr);
-            if (isFilled) setBlackFill();
-            if (tag === "line") {
-              const [x1, y1] = T(+child.getAttribute("x1"), +child.getAttribute("y1"));
-              const [x2, y2] = T(+child.getAttribute("x2"), +child.getAttribute("y2"));
-              pdf.line(x1, y1, x2, y2);
-            } else if (tag === "rect") {
-              const [rx, ry] = T(+(child.getAttribute("x") || 0), +(child.getAttribute("y") || 0));
-              const rw = +child.getAttribute("width") * sx;
-              const rh = +child.getAttribute("height") * sy;
-              const cr = +(child.getAttribute("rx") || 0) * sx;
-              const style = isFilled ? "F" : "S";
-              if (cr > 0) pdf.roundedRect(rx, ry, rw, rh, cr, cr, style);
-              else pdf.rect(rx, ry, rw, rh, style);
-            } else if (tag === "circle") {
-              const [cx, cy] = T(+child.getAttribute("cx"), +child.getAttribute("cy"));
-              const r = +child.getAttribute("r") * sx;
-              pdf.circle(cx, cy, r, isFilled ? "F" : "S");
-            } else if (tag === "ellipse") {
-              const [cx, cy] = T(+child.getAttribute("cx"), +child.getAttribute("cy"));
-              pdf.ellipse(cx, cy, +child.getAttribute("rx") * sx, +child.getAttribute("ry") * sy, isFilled ? "F" : "S");
-            } else if (tag === "polygon" || tag === "polyline") {
-              const nums = (child.getAttribute("points") || "").trim().split(/[\s,]+/).map(Number);
-              const pts = [];
-              for (let i = 0; i < nums.length; i += 2) pts.push(T(nums[i], nums[i + 1]));
-              for (let i = 0; i < pts.length - 1; i++) pdf.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
-              if (tag === "polygon" && pts.length > 2) {
-                pdf.line(pts.at(-1)[0], pts.at(-1)[1], pts[0][0], pts[0][1]);
-                if (isFilled) {
-                  for (let i = 1; i < pts.length - 1; i++) {
-                    pdf.triangle(pts[0][0], pts[0][1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], "F");
-                  }
-                }
-              }
-            } else if (tag === "path") {
-              drawPath(pdf, child.getAttribute("d") || "", T, sx, sy, isFilled);
-            }
-            if (isFilled) setBlackFill();  // reset state if needed
-          }
-        };
-        drawChildren(svg);
-      });
+      // ─── 6. Spec icons — captured in the bitmap above; no vector overlay
+      //       (the new Batavia icon set uses filled paths, and an outline-
+      //       only redraw would print the wrong shape).
 
       // ─── 7. QR rendering ──────────────────────────────────────────
       if (qrSvg && qrSvgInfo && qrChildren.length) {
