@@ -5,14 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Product Data Sheet Template</title>
 <style>
-  /* Roboto variable font — Regular (400) + Black (900) used; the file
-     covers 100–900 so other weights in the UI fall back to it cleanly.
+  /* Roboto Regular (400) and Black (900). Static TTFs so jsPDF can embed
+     the exact same glyphs in the PDF export (no Helvetica substitution).
      SIL Open Font License — see /fonts/OFL.txt */
   @font-face {
     font-family: "Roboto";
-    src: url("fonts/Roboto-VariableFont.ttf") format("truetype-variations"),
-         url("fonts/Roboto-VariableFont.ttf") format("truetype");
-    font-weight: 100 900;
+    src: url("fonts/Roboto-Regular.ttf") format("truetype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Roboto";
+    src: url("fonts/Roboto-Black.ttf") format("truetype");
+    font-weight: 900;
     font-style: normal;
     font-display: swap;
   }

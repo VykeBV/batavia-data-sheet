@@ -335,6 +335,39 @@ function SpecRow({ spec, onChange, customIcons, setCustomIcons }) {
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
+// ── Roboto font data for jsPDF embedding ──────────────────────────
+//    jsPDF only ships Helvetica/Times/Courier. To get real Roboto in
+//    the exported PDF (not a Helvetica substitution), we fetch the
+//    static TTFs as base64 once, then attach them to every jsPDF
+//    instance via addFileToVFS + addFont before drawing text.
+let __robotoFontCache = null;
+const __loadRobotoForPdf = async () => {
+  if (__robotoFontCache) return __robotoFontCache;
+  const fetchB64 = async (path) => {
+    const resp = await fetch(path);
+    if (!resp.ok) throw new Error("Failed to load " + path + ": " + resp.status);
+    const blob = await resp.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+  const [reg, black] = await Promise.all([
+    fetchB64("fonts/Roboto-Regular.ttf"),
+    fetchB64("fonts/Roboto-Black.ttf"),
+  ]);
+  __robotoFontCache = { reg, black };
+  return __robotoFontCache;
+};
+const __registerRoboto = (pdf, fonts) => {
+  pdf.addFileToVFS("Roboto-Regular.ttf", fonts.reg);
+  pdf.addFont("Roboto-Regular.ttf", "Roboto", "normal");
+  pdf.addFileToVFS("Roboto-Black.ttf", fonts.black);
+  pdf.addFont("Roboto-Black.ttf", "Roboto", "black");
+};
+
 function App() {
   const [t, setTweak] = useTweaks(DEFAULTS);
 
@@ -504,6 +537,13 @@ function App() {
   const captureCardIntoPdf = useCallback(async (pdf, state) => {
     const card = document.querySelector(".datasheet");
     if (!card) return false;
+    // Embed Roboto into this PDF instance (cached after first load).
+    try {
+      const fonts = await __loadRobotoForPdf();
+      __registerRoboto(pdf, fonts);
+    } catch (e) {
+      console.warn("Roboto font load failed; PDF will fall back to Helvetica", e);
+    }
     const [w, h] = state.ratio.split(":").map(Number);
     const wide = state.ratio === "20:9.5";
 
@@ -600,29 +640,29 @@ function App() {
         pdf.triangle(w, 0, w, h, w - tw, h, "F");
       }
 
-      // ─── 3. Title (CMYK black, Helvetica Bold) ────────────────────
+      // ─── 3. Title (CMYK black, Roboto Black) ──────────────────────
       if (titleInfo && titleInfo.text) {
         setBlackText();
-        pdf.setFont("Helvetica", "bold");
+        pdf.setFont("Roboto", "black");
         pdf.setFontSize(titleInfo.font.cm * 10 * 2.83465);
         const baselineCm = titleInfo.y + titleInfo.font.cm * 0.85;
         pdf.text(titleInfo.text, titleInfo.x, baselineCm);
       }
 
-      // ─── 4. Subtitle (CMYK orange) ────────────────────────────────
+      // ─── 4. Subtitle (CMYK orange, Roboto Regular) ────────────────
       if (subtitleInfo && subtitleInfo.text) {
         setOrangeText();
-        pdf.setFont("Helvetica", "normal");
+        pdf.setFont("Roboto", "normal");
         pdf.setFontSize(subtitleInfo.font.cm * 10 * 2.83465);
         const baselineCm = subtitleInfo.y + subtitleInfo.font.cm * 0.9;
         pdf.text(subtitleInfo.text, subtitleInfo.x, baselineCm);
       }
 
-      // ─── 5. Spec text rows (CMYK black) ───────────────────────────
+      // ─── 5. Spec text rows (CMYK black, Roboto Regular) ───────────
       specTextInfos.forEach((info) => {
         if (!info.text) return;
         setBlackText();
-        pdf.setFont("Helvetica", "normal");
+        pdf.setFont("Roboto", "normal");
         pdf.setFontSize(info.font.cm * 10 * 2.83465);
         // Vertically centre on the row (icon height ~6mm)
         const baselineCm = info.y + info.font.cm * 0.9;
@@ -751,10 +791,10 @@ function App() {
         }
       });
 
-      // ─── 9. QR label (CMYK black) ─────────────────────────────────
+      // ─── 9. QR label (CMYK black, Roboto Regular) ─────────────────
       if (qrLabelInfo && qrLabelInfo.text) {
         setBlackText();
-        pdf.setFont("Helvetica", "bold");
+        pdf.setFont("Roboto", "normal");
         pdf.setFontSize(qrLabelInfo.font.cm * 10 * 2.83465);
         const baselineCm = qrLabelInfo.y + qrLabelInfo.font.cm * 0.9;
         // Centre under the QR
