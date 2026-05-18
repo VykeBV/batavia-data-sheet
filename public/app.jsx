@@ -7,7 +7,8 @@ const DEFAULTS = /*EDITMODE-BEGIN*/{
   "title": "BRUSHLESS COMBI DRILL",
   "subtitle": "18V Maxxpack Collection",
   "accent": "#FF8C00",
-  "ratio": "10:9.5",
+  "ratio": "10:10",
+  "bleed": false,
   "specs": [
     {"icon": "voltage_18v_li_ion",   "text": "18 Volt Li-Ion"},
     {"icon": "torque_40nm",          "text": "75 Nm"},
@@ -390,8 +391,9 @@ function App() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(t)); } catch (e) { /* quota */ }
   }, [t]);
 
-  const isWide = t.ratio === "20:9.5";
-  const MAX_SPECS = isWide ? 12 : 5;  // 3 rows × up to 4 cols in wide; single column in tall
+  const isTall = t.ratio === "10:20";
+  // 10×10 square fits ~5 specs; 10×20 tall fits more (single column up to 12).
+  const MAX_SPECS = isTall ? 12 : 5;
 
   const setSpec = (idx, next) => {
     const specs = t.specs.slice();
@@ -401,7 +403,9 @@ function App() {
 
   const addSpec = () => {
     if (t.specs.length >= MAX_SPECS) return;
-    setTweak("specs", [...t.specs, { icon: "gear", text: "New spec" }]);
+    // First key in the library is the default icon for new rows.
+    const firstIcon = Object.keys(window.ICON_LIBRARY)[0] || "voltage_18v_li_ion";
+    setTweak("specs", [...t.specs, { icon: firstIcon, text: "New spec" }]);
   };
   const removeSpec = (idx) => {
     if (t.specs.length <= 1) return;
@@ -417,12 +421,13 @@ function App() {
     const row = {
       title: state.title || "",
       subtitle: state.subtitle || "",
-      ratio: state.ratio || "10:9.5",
+      ratio: state.ratio || "10:10",
       accent: state.accent || "#FF8C00",
       qrUrl: state.qrUrl || "",
       qrLabel: state.qrLabel || "",
       showTriangle: state.showTriangle ? "1" : "0",
       showQr: state.showQr ? "1" : "0",
+      bleed: state.bleed ? "1" : "0",
     };
     for (let i = 0; i < MAX_SPECS_CSV; i++) {
       const s = (state.specs || [])[i];
@@ -447,6 +452,7 @@ function App() {
     if (row.qrLabel != null) out.qrLabel = row.qrLabel;
     if (row.showTriangle != null) out.showTriangle = /^(1|true|yes)$/i.test(row.showTriangle);
     if (row.showQr != null) out.showQr = /^(1|true|yes)$/i.test(row.showQr);
+    if (row.bleed != null) out.bleed = /^(1|true|yes)$/i.test(row.bleed);
     if (specs.length) out.specs = specs;
     return out;
   };
@@ -546,7 +552,10 @@ function App() {
       console.warn("Roboto font load failed; PDF will fall back to Helvetica", e);
     }
     const [w, h] = state.ratio.split(":").map(Number);
-    const wide = state.ratio === "20:9.5";
+    // Bleed in cm (3 mm = 0.3 cm) added to each side of the trim box.
+    const bleedCm = state.bleed ? 0.3 : 0;
+    const pageW = w + 2 * bleedCm;
+    const pageH = h + 2 * bleedCm;
 
     // ─── Elements ───────────────────────────────────────────────────
     const triangleEl   = card.querySelector(".ds-triangle");
@@ -557,11 +566,13 @@ function App() {
     const qrSvg        = card.querySelector(".qr-frame svg");
     const qrLabelEl    = card.querySelector(".qr-label");
     const brackets     = [...card.querySelectorAll(".qr-bracket")];
+    const cutLineEl    = card.querySelector(".cut-line");
 
     // ─── Measurements (BEFORE hiding anything) ──────────────────────
+    // cardRect already includes the bleed-inclusive size; pageW/H map to it.
     const cardRect = card.getBoundingClientRect();
-    const pxToCmX = w / cardRect.width;
-    const pxToCmY = h / cardRect.height;
+    const pxToCmX = pageW / cardRect.width;
+    const pxToCmY = pageH / cardRect.height;
     const posOf = (el) => {
       const r = el.getBoundingClientRect();
       return {
@@ -605,9 +616,10 @@ function App() {
     // (Spec icons are kept visible — the new Batavia icon set uses filled
     // paths, and the SVG-to-jsPDF renderer only strokes, so we let
     // html2canvas capture them as bitmap instead of stroking outlines.)
+    // The cut-line marker is on-screen guidance only; it must not print.
     const visEls = [
       triangleEl, titleEl, subtitleEl, ...specTextEls,
-      qrSvg, qrLabelEl, ...brackets,
+      qrSvg, qrLabelEl, ...brackets, cutLineEl,
     ].filter(Boolean);
     const prevVisMap = new Map();
     visEls.forEach((el) => {
@@ -623,7 +635,7 @@ function App() {
         useCORS: true,
         logging: false,
       });
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h, undefined, "FAST");
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, pageW, pageH, undefined, "FAST");
 
       // CMYK setters (jsPDF expects 0–1)
       const isBlackAccent = state.accent === "#000000";
@@ -637,11 +649,13 @@ function App() {
       const setBlackText = () => pdf.setTextColor(0, 0, 0, 1);
       const setBlackStroke = () => pdf.setDrawColor(0, 0, 0, 1);
 
-      // ─── 2. Triangle (CMYK orange, full height) ───────────────────
+      // ─── 2. Triangle (CMYK orange, full bleed-inclusive height) ──
+      //       Extends to the page corners so the orange continues past
+      //       the trim and survives the print shop's cut.
       if (state.showTriangle) {
         setOrangeFill();
-        const tw = h * 0.4;
-        pdf.triangle(w, 0, w, h, w - tw, h, "F");
+        const tw = pageH * 0.4;
+        pdf.triangle(pageW, 0, pageW, pageH, pageW - tw, pageH, "F");
       }
 
       // ─── 3. Title (CMYK black, Roboto Black) ──────────────────────
@@ -912,14 +926,18 @@ function App() {
     await withStageNeutral(async () => {
       try {
         const [w, h] = t.ratio.split(":").map(Number);
+        const bleedCm = t.bleed ? 0.3 : 0;
+        const pageW = w + 2 * bleedCm;
+        const pageH = h + 2 * bleedCm;
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({
-          orientation: w >= h ? "landscape" : "portrait",
-          unit: "cm", format: [w, h], compress: true,
+          orientation: pageW >= pageH ? "landscape" : "portrait",
+          unit: "cm", format: [pageW, pageH], compress: true,
         });
         await captureCardIntoPdf(pdf, t);
         const safe = (t.title || "datasheet").replace(/[^a-z0-9 \-_]/gi, "").trim() || "datasheet";
-        pdf.save(`${safe} (${w}x${h}cm).pdf`);
+        const bleedTag = t.bleed ? " bleed" : "";
+        pdf.save(`${safe} (${w}x${h}cm${bleedTag}).pdf`);
       } catch (e) {
         console.error("PDF export failed:", e);
         alert("PDF export failed: " + (e?.message || e));
@@ -951,13 +969,16 @@ function App() {
           Object.keys(patch).forEach(k => setTweak(k, patch[k]));
           await waitForRender(280);
           const [w, h] = merged.ratio.split(":").map(Number);
+          const bleedCm = merged.bleed ? 0.3 : 0;
+          const pageW = w + 2 * bleedCm;
+          const pageH = h + 2 * bleedCm;
           if (!pdf) {
             pdf = new jsPDF({
-              orientation: w >= h ? "landscape" : "portrait",
-              unit: "cm", format: [w, h], compress: true,
+              orientation: pageW >= pageH ? "landscape" : "portrait",
+              unit: "cm", format: [pageW, pageH], compress: true,
             });
           } else {
-            pdf.addPage([w, h], w >= h ? "landscape" : "portrait");
+            pdf.addPage([pageW, pageH], pageW >= pageH ? "landscape" : "portrait");
           }
           await captureCardIntoPdf(pdf, merged);
         }
@@ -1027,10 +1048,11 @@ function App() {
     <>
       <div className="stage" ref={stageRef}>
       <div
-        className={`datasheet ${isWide ? "is-wide" : ""}`}
-        style={{ "--accent": t.accent }}
+        className={`datasheet ${isTall ? "is-tall" : ""}`}
+        style={{ "--accent": t.accent, "--bleed": t.bleed ? "3mm" : "0mm" }}
         ref={cardRef}
       >
+        {t.bleed && <div className="cut-line" aria-hidden="true" />}
         <div className="ds-body">
           <div className="ds-header">
             <Editable
@@ -1104,10 +1126,15 @@ function App() {
           label="Print size"
           value={t.ratio}
           options={[
-            { value: "10:9.5", label: "10 × 9.5 cm" },
-            { value: "20:9.5", label: "20 × 9.5 cm" },
+            { value: "10:10", label: "10 × 10 cm" },
+            { value: "10:20", label: "10 × 20 cm" },
           ]}
           onChange={(v) => setTweak("ratio", v)}
+        />
+        <TweakToggle
+          label="Bleed (3 mm)"
+          value={!!t.bleed}
+          onChange={(v) => setTweak("bleed", v)}
         />
 
         <TweakSection label="Content" />
@@ -1157,7 +1184,7 @@ function App() {
           label={
             batchProgress
               ? `Generating page ${batchProgress.i} / ${batchProgress.n}…`
-              : `Download as PDF (${t.ratio.replace(":", " × ")} cm)`
+              : `Download as PDF (${t.ratio.replace(":", " × ")} cm${t.bleed ? " + 3 mm bleed" : ""})`
           }
           onClick={downloadPdf}
         />
