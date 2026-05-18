@@ -1255,14 +1255,6 @@ function App() {
           <TweakButton secondary label="+ Add page" onClick={() => addPage()} />
           <TweakButton secondary label="Duplicate" onClick={() => addPage({ duplicate: true })} />
         </div>
-        <TweakButton
-          label={
-            batchProgress
-              ? `Exporting page ${batchProgress.i} / ${batchProgress.n}…`
-              : `Export all ${pages.length} page${pages.length === 1 ? "" : "s"}`
-          }
-          onClick={exportAllPages}
-        />
 
         <TweakSection label="Format" />
         <TweakRadio
@@ -1331,6 +1323,16 @@ function App() {
           }
           onClick={downloadPdf}
         />
+        {pages.length > 1 && (
+          <TweakButton
+            label={
+              batchProgress
+                ? `Exporting page ${batchProgress.i} / ${batchProgress.n}…`
+                : `Export all ${pages.length} pages as PDF`
+            }
+            onClick={exportAllPages}
+          />
+        )}
         <div style={{ display: "flex", gap: "6px" }}>
           <TweakButton label="Export CSV" onClick={exportCsv} secondary />
           <TweakButton label="Import CSV" onClick={() => csvInputRef.current?.click()} secondary />
