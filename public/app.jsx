@@ -10,9 +10,9 @@ const DEFAULTS = /*EDITMODE-BEGIN*/{
   "ratio": "10:10",
   "bleed": false,
   "specs": [
-    {"icon": "j11", "text": ""},
-    {"icon": "a17", "text": ""},
-    {"icon": "a10", "text": ""}
+    {"icon": "_blank", "text": ""},
+    {"icon": "_blank", "text": ""},
+    {"icon": "_blank", "text": ""}
   ],
   "qrUrl": "https://example.com",
   "qrLabel": "SCAN ME",
@@ -189,13 +189,16 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
     ? allEntries.filter(([key, ic]) =>
         key.toLowerCase().includes(q) || (ic.label || "").toLowerCase().includes(q))
     : allEntries;
+  // The placeholder icon ('No icon') gets its own pinned group at the top.
+  const placeholderEntry = matches.find(([key]) => key === "_blank");
   const groups = (window.ICON_CATEGORIES || []).map(cat => ({
     id: cat.id,
     label: cat.label,
     items: matches.filter(([_, ic]) => ic.category === cat.id),
   })).filter(g => g.items.length > 0);
-  // Custom icons + uncategorised built-ins fall under a final group.
-  const uncategorised = matches.filter(([_, ic]) => !ic.category);
+  // Other uncategorised built-ins fall under a final 'Other' group (the
+  // placeholder is rendered separately above).
+  const uncategorised = matches.filter(([key, ic]) => !ic.category && key !== "_blank");
   const customMatches = q
     ? (customIcons || []).filter(c =>
         (c.key || "").toLowerCase().includes(q) || (c.label || "").toLowerCase().includes(q))
@@ -280,8 +283,17 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
       </div>
 
       <div className="icon-picker-scroll">
-        {totalMatches === 0 && (
+        {totalMatches === 0 && !placeholderEntry && (
           <div className="icon-picker-empty">No icons match "{query}". Try a different term, or upload your own below.</div>
+        )}
+
+        {placeholderEntry && (
+          <div className="icon-picker-group">
+            <div className="icon-picker-group-hd">Placeholder</div>
+            <div className="icon-picker-grid">
+              {renderTile(placeholderEntry[0], placeholderEntry[1])}
+            </div>
+          </div>
         )}
 
         {customMatches.length > 0 && (
@@ -434,6 +446,23 @@ const __registerRoboto = (pdf, fonts) => {
 // localStorage key. State shape: { pages: [...], activeIndex }.
 // Pre-multi-page builds stored a single page object directly; we migrate on
 // first load so existing in-browser work isn't lost.
+// Inject a placeholder icon into the library so brand-new specs render as
+// a dashed empty box (a clear visual cue: "click to pick an icon") rather
+// than guessing a real Batavia pictogram.
+const PLACEHOLDER_ICON_KEY = "_blank";
+if (typeof window !== "undefined" && window.ICON_LIBRARY && !window.ICON_LIBRARY[PLACEHOLDER_ICON_KEY]) {
+  window.ICON_LIBRARY[PLACEHOLDER_ICON_KEY] = {
+    category: null,
+    label: "No icon",
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+      + 'stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 2" '
+      + 'stroke-linecap="round" stroke-linejoin="round">'
+      + '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/>'
+      + '</svg>',
+  };
+}
+
 const STORAGE_KEY = "batavia-datasheet-state-v1";
 const loadInitialAppState = () => {
   try {
@@ -523,9 +552,8 @@ function App() {
 
   const addSpec = () => {
     if (t.specs.length >= MAX_SPECS) return;
-    // First key in the library is the default icon for new rows.
-    const firstIcon = Object.keys(window.ICON_LIBRARY)[0] || "voltage_18v_li_ion";
-    setTweak("specs", [...t.specs, { icon: firstIcon, text: "New spec" }]);
+    // New specs start with the placeholder icon — a clear "pick me" prompt.
+    setTweak("specs", [...t.specs, { icon: PLACEHOLDER_ICON_KEY, text: "" }]);
   };
   const removeSpec = (idx) => {
     if (t.specs.length <= 1) return;
