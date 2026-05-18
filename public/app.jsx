@@ -370,26 +370,84 @@ const __registerRoboto = (pdf, fonts) => {
   pdf.addFont("Roboto-Black.ttf", "Roboto", "black");
 };
 
-function App() {
-  const [t, setTweak] = useTweaks(DEFAULTS);
+// localStorage key. State shape: { pages: [...], activeIndex }.
+// Pre-multi-page builds stored a single page object directly; we migrate on
+// first load so existing in-browser work isn't lost.
+const STORAGE_KEY = "batavia-datasheet-state-v1";
+const loadInitialAppState = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.pages) && parsed.pages.length) {
+        return {
+          pages: parsed.pages,
+          activeIndex: Math.max(0, Math.min(parsed.activeIndex || 0, parsed.pages.length - 1)),
+        };
+      }
+      // Old format: a single page object stored at the root.
+      if (parsed && typeof parsed === "object" && parsed.title !== undefined) {
+        return { pages: [{ ...DEFAULTS, ...parsed }], activeIndex: 0 };
+      }
+    }
+  } catch (e) { /* ignore — fall through to defaults */ }
+  return { pages: [{ ...DEFAULTS }], activeIndex: 0 };
+};
 
-  // ── Persist all tweak state to localStorage (so standalone exports
-  //    don't lose work between reloads) ───────────────────────────────
-  const STORAGE_KEY = "batavia-datasheet-state-v1";
-  // Restore on first mount
+function App() {
+  // ── Multi-page state ────────────────────────────────────────────────
+  //    pages[] holds the per-page tweak state; t is the active page.
+  //    setTweak writes into the active page (existing call-sites unchanged).
+  const [appState, setAppState] = useState(loadInitialAppState);
+  const pages = appState.pages;
+  const activeIndex = appState.activeIndex;
+  const t = pages[activeIndex];
+
+  const setTweak = useCallback((keyOrEdits, val) => {
+    const edits = typeof keyOrEdits === "object" && keyOrEdits !== null
+      ? keyOrEdits : { [keyOrEdits]: val };
+    setAppState(prev => {
+      const newPages = prev.pages.slice();
+      newPages[prev.activeIndex] = { ...newPages[prev.activeIndex], ...edits };
+      return { ...prev, pages: newPages };
+    });
+    // Host-protocol echo (same as the original useTweaks).
+    try { window.parent.postMessage({ type: "__edit_mode_set_keys", edits }, "*"); } catch (e) {}
+    window.dispatchEvent(new CustomEvent("tweakchange", { detail: edits }));
+  }, []);
+
+  const selectPage = useCallback((idx) => {
+    setAppState(prev => ({ ...prev, activeIndex: idx }));
+  }, []);
+
+  const addPage = useCallback((opts = {}) => {
+    setAppState(prev => {
+      const source = opts.duplicate ? prev.pages[prev.activeIndex] : DEFAULTS;
+      const newPage = JSON.parse(JSON.stringify(source));
+      if (opts.duplicate) {
+        newPage.title = `${(newPage.title || "Untitled").replace(/ \(Copy.*\)$/, "")} (Copy)`;
+      } else {
+        newPage.title = `PAGE ${prev.pages.length + 1}`;
+      }
+      return { pages: [...prev.pages, newPage], activeIndex: prev.pages.length };
+    });
+  }, []);
+
+  const deletePage = useCallback((idx) => {
+    setAppState(prev => {
+      if (prev.pages.length <= 1) return prev;
+      const newPages = prev.pages.filter((_, i) => i !== idx);
+      let newIdx = prev.activeIndex;
+      if (idx < newIdx) newIdx -= 1;
+      else if (idx === newIdx) newIdx = Math.min(newIdx, newPages.length - 1);
+      return { pages: newPages, activeIndex: newIdx };
+    });
+  }, []);
+
+  // Autosave the full multi-page state on any change.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (!saved || typeof saved !== "object") return;
-      Object.keys(saved).forEach((k) => setTweak(k, saved[k]));
-    } catch (e) { /* ignore */ }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // Save on any change
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(t)); } catch (e) { /* quota */ }
-  }, [t]);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appState)); } catch (e) { /* quota */ }
+  }, [appState]);
 
   const isWide = t.ratio === "20:10";
   // 10×10 square fits ~5 specs in a single column; 20×10 wide fits up to 12
@@ -532,9 +590,8 @@ function App() {
   }, [setTweak]);
 
   const resetState = useCallback(() => {
-    if (!window.confirm("Reset all fields to the default datasheet?")) return;
-    Object.keys(DEFAULTS).forEach(k => setTweak(k, DEFAULTS[k]));
-    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    if (!window.confirm("Reset this page to the default datasheet?")) return;
+    setTweak(DEFAULTS);
   }, [setTweak]);
 
   // ── Capture the .datasheet DOM into an existing jsPDF page ──────
@@ -946,8 +1003,54 @@ function App() {
     });
   }, [t, captureCardIntoPdf]);
 
-  // ── Batch: CSV with N rows → N-page PDF ─────────────────────────────
+  // Shared progress meter — used by CSV batch AND the in-app multi-page export.
   const [batchProgress, setBatchProgress] = useState(null);  // {i, n} | null
+
+  // ── Export every page in the editor to one combined PDF ─────────────
+  const exportAllPages = useCallback(async () => {
+    if (!window.html2canvas || !window.jspdf) {
+      alert("PDF libraries are still loading—please try again in a moment.");
+      return;
+    }
+    if (pages.length === 0) return;
+    const originalIndex = activeIndex;
+    await withStageNeutral(async () => {
+      try {
+        const { jsPDF } = window.jspdf;
+        let pdf = null;
+        for (let i = 0; i < pages.length; i++) {
+          setBatchProgress({ i: i + 1, n: pages.length });
+          // Switch active page so the .datasheet DOM renders this page's state.
+          setAppState(prev => ({ ...prev, activeIndex: i }));
+          await waitForRender(280);
+          const page = pages[i];
+          const [w, h] = page.ratio.split(":").map(Number);
+          const bleedCm = page.bleed ? 0.3 : 0;
+          const pageW = w + 2 * bleedCm;
+          const pageH = h + 2 * bleedCm;
+          if (!pdf) {
+            pdf = new jsPDF({
+              orientation: pageW >= pageH ? "landscape" : "portrait",
+              unit: "cm", format: [pageW, pageH], compress: true,
+            });
+          } else {
+            pdf.addPage([pageW, pageH], pageW >= pageH ? "landscape" : "portrait");
+          }
+          await captureCardIntoPdf(pdf, page);
+        }
+        setAppState(prev => ({ ...prev, activeIndex: originalIndex }));
+        setBatchProgress(null);
+        if (pdf) pdf.save(`Datasheets (${pages.length} page${pages.length === 1 ? "" : "s"}).pdf`);
+      } catch (e) {
+        console.error("Multi-page export failed:", e);
+        alert("Export failed: " + (e?.message || e));
+        setBatchProgress(null);
+        setAppState(prev => ({ ...prev, activeIndex: originalIndex }));
+      }
+    });
+  }, [pages, activeIndex, captureCardIntoPdf]);
+
+  // ── Batch: CSV with N rows → N-page PDF ─────────────────────────────
   const batchPdf = useCallback(async (file) => {
     if (!window.html2canvas || !window.jspdf) {
       alert("PDF libraries are still loading—please try again in a moment.");
@@ -1122,6 +1225,45 @@ function App() {
       </div>
 
       <TweaksPanel>
+        <TweakSection label="Pages" />
+        <div className="page-list">
+          {pages.map((page, i) => (
+            <div key={i} className={`page-row ${i === activeIndex ? "is-active" : ""}`}>
+              <button
+                type="button"
+                className="page-row-select"
+                onClick={() => selectPage(i)}
+                title={page.title || "Untitled"}
+              >
+                <span className="page-num">{String(i + 1).padStart(2, "0")}</span>
+                <span className="page-title">{page.title || "Untitled"}</span>
+              </button>
+              {pages.length > 1 && (
+                <button
+                  type="button"
+                  className="page-row-delete"
+                  onClick={() => {
+                    if (window.confirm(`Remove page ${i + 1}?`)) deletePage(i);
+                  }}
+                  title="Remove this page"
+                >×</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: "6px" }}>
+          <TweakButton secondary label="+ Add page" onClick={() => addPage()} />
+          <TweakButton secondary label="Duplicate" onClick={() => addPage({ duplicate: true })} />
+        </div>
+        <TweakButton
+          label={
+            batchProgress
+              ? `Exporting page ${batchProgress.i} / ${batchProgress.n}…`
+              : `Export all ${pages.length} page${pages.length === 1 ? "" : "s"}`
+          }
+          onClick={exportAllPages}
+        />
+
         <TweakSection label="Format" />
         <TweakRadio
           label="Print size"
@@ -1227,9 +1369,9 @@ function App() {
           Click any <b>icon</b> to swap it or upload your own.<br/>
           Click any <b>text</b> to edit it.<br/>
           Hover a spec row to remove it.<br/>
-          <b>Export CSV</b> saves this datasheet as a row.
-          Upload a multi-row CSV via <b>Batch</b> to generate a multi-page PDF.
+          Use <b>Pages</b> to build multi-page sets — <b>Export all</b> packs them into one PDF.
         </div>
+        <div className="twk-autosave">✓ Auto-saved in this browser</div>
 
         <div className="twk-footer">powered by Xafai</div>
       </TweaksPanel>
