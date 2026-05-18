@@ -391,9 +391,10 @@ function App() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(t)); } catch (e) { /* quota */ }
   }, [t]);
 
-  const isTall = t.ratio === "10:20";
-  // 10×10 square fits ~5 specs; 10×20 tall fits more (single column up to 12).
-  const MAX_SPECS = isTall ? 12 : 5;
+  const isWide = t.ratio === "20:10";
+  // 10×10 square fits ~5 specs in a single column; 20×10 wide fits up to 12
+  // in a 3-row grid that flows into multiple columns.
+  const MAX_SPECS = isWide ? 12 : 5;
 
   const setSpec = (idx, next) => {
     const specs = t.specs.slice();
@@ -1048,7 +1049,7 @@ function App() {
     <>
       <div className="stage" ref={stageRef}>
       <div
-        className={`datasheet ${isTall ? "is-tall" : ""}`}
+        className={`datasheet ${isWide ? "is-wide" : ""}`}
         style={{ "--accent": t.accent, "--bleed": t.bleed ? "3mm" : "0mm" }}
         ref={cardRef}
       >
@@ -1127,7 +1128,7 @@ function App() {
           value={t.ratio}
           options={[
             { value: "10:10", label: "10 × 10 cm" },
-            { value: "10:20", label: "10 × 20 cm" },
+            { value: "20:10", label: "20 × 10 cm" },
           ]}
           onChange={(v) => setTweak("ratio", v)}
         />

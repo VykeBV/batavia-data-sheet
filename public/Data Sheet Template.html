@@ -250,9 +250,10 @@
     box-shadow: 0 30px 80px -30px rgba(0,0,0,.25), 0 1px 0 rgba(0,0,0,.04);
   }
   .stage[data-zoom] { transform-origin: center; }
-  .datasheet.is-tall {
-    --w-cm: 10;
-    --h-cm: 20;
+  .datasheet.is-wide {
+    --w-cm: 20;
+    --h-cm: 10;
+    --safe-width: 82%;
   }
 
   /* Cut-line marker — on-screen only, shows where the print shop trims.
@@ -286,10 +287,12 @@
     flex: 1;
     min-height: 0;
   }
+  .datasheet.is-wide .ds-main { justify-content: center; }
 
   /* Header — occupies almost full width; triangle is just a point
      at top-right, so title rarely needs to wrap. */
   .ds-header { position: relative; z-index: 2; width: 92%; }
+  .datasheet.is-wide .ds-header { width: 95%; }
   .ds-title {
     display: block;
     font-family: "Roboto", sans-serif;
@@ -309,8 +312,10 @@
     line-height: 1.2;
     color: var(--accent);
   }
+  .datasheet.is-wide .ds-title { font-size: 7mm; }
+  .datasheet.is-wide .ds-subtitle { font-size: 4mm; }
 
-  /* Spec rows — single column on both 10×10 and 10×20. */
+  /* Spec rows — single column on 10×10, multi-column grid on 20×10. */
   .ds-specs {
     position: relative;
     z-index: 2;
@@ -319,6 +324,15 @@
     flex-direction: column;
     gap: 1mm;
     width: var(--safe-width);  /* widest column-set that fits left of the triangle's bottom edge */
+  }
+  .datasheet.is-wide .ds-specs {
+    display: grid;
+    grid-template-rows: repeat(3, auto);
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    column-gap: 10mm;
+    row-gap: 2.5mm;
+    width: var(--safe-width);
   }
   .spec-wrap {
     position: relative;
@@ -347,6 +361,7 @@
     place-items: center;
     transition: border-color .15s ease, background .15s ease;
   }
+  .datasheet.is-wide .spec-icon { width: 7mm; height: 7mm; }
   .spec-icon:hover { border-color: rgba(0,0,0,.18); background: rgba(0,0,0,.02); }
   .spec-icon svg { width: 100%; height: 100%; display: block; }
   .spec-row { gap: 2.5mm; }
@@ -358,6 +373,7 @@
     line-height: 1.2;
     white-space: nowrap;
   }
+  .datasheet.is-wide .spec-text { font-size: 3.8mm; }
 
   /* Row hover controls */
   .spec-remove {
@@ -417,6 +433,7 @@
     place-items: center;
   }
   .qr-frame svg { width: 100%; height: 100%; }
+  .datasheet.is-wide .qr-frame { width: 26mm; height: 26mm; }
   .qr-bracket {
     position: absolute;
     width: 3.2mm;
