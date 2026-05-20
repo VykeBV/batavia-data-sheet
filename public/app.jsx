@@ -449,73 +449,76 @@ const __loadRobotoForPdf = async () => {
   return __robotoOpentypeCache;
 };
 
-// Draw outlined text into jsPDF as a single filled compound path using
-// even-odd winding. Required so glyphs with inside-holes (O, A, D, e, o,
-// p, etc.) render as rings, not solid blobs. jsPDF's pdf.lines() fills
-// each contour independently — the inner counter contour ends up filled
-// too. By emitting raw PDF stream operators (m / l / c / h / f*) we can
-// put every glyph contour into one path and rely on PDF's even-odd rule.
+// Draw outlined text into jsPDF as filled vector paths. Each glyph gets
+// its OWN PDF subpath + fill operator — the previous build emitted one
+// huge compound path across the whole text, and a printer RIP somewhere
+// down the line was dropping a subpath of the 'M' glyph (the first stem
+// stroke went missing on physical print even though on-screen looked
+// fine). Per-glyph emission means the RIP only ever sees a single
+// character's contours at a time. Glyph holes (O, B, D, e, o, etc.)
+// still render correctly because each glyph's outer + counter contours
+// land in the same fill, and TrueType outlines wind those opposite ways
+// so non-zero filling produces rings.
 // Coordinates are in cm; fontSizeCm is the desired text size; the caller
-// is expected to have set the fill colour beforehand (CMYK supported).
-// Returns the rendered advance width in cm so callers can centre-align.
+// must set the fill colour beforehand (CMYK supported by jsPDF).
+// Returns the rendered advance width in cm for centre-alignment.
 const __drawTextAsPaths = (pdf, text, xCm, yBaselineCm, fontSizeCm, font) => {
   if (!text || !font) return 0;
   const fontSizePt = fontSizeCm * 28.3465;
   const PT_TO_CM = 1 / 28.3465;
-  const path = font.getPath(text, 0, 0, fontSizePt);
-  const cmds = path.commands;
-  if (!cmds.length) return 0;
-
   const internal = pdf.internal;
-  const sf = internal.scaleFactor; // user-unit → pt
+  const sf = internal.scaleFactor;
   const pageH = internal.pageSize.getHeight();
   const xPdf = (uCm) => (uCm * sf).toFixed(3);
-  // PDF user space puts origin at bottom-left; jsPDF gives us a top-left
-  // origin so callers can work in design-space. Flip Y for raw stream.
   const yPdf = (uCm) => ((pageH - uCm) * sf).toFixed(3);
 
+  // Iterate the text codepoint-by-codepoint so each character becomes its
+  // own discrete PDF fill. We track an x advance manually using opentype's
+  // per-glyph advanceWidth so the layout matches what font.getPath() of
+  // the full string would have produced (sans kerning, which the
+  // datasheet doesn't depend on).
+  let advanceX = 0;
   let stream = "";
-  let lastX = 0, lastY = 0;       // track current point for Q→C conversion
-  for (const c of cmds) {
-    const ux = (px) => xCm + px * PT_TO_CM;
-    const uy = (py) => yBaselineCm + py * PT_TO_CM;
-    if (c.type === "M") {
-      stream += `${xPdf(ux(c.x))} ${yPdf(uy(c.y))} m\n`;
-      lastX = c.x; lastY = c.y;
-    } else if (c.type === "L") {
-      stream += `${xPdf(ux(c.x))} ${yPdf(uy(c.y))} l\n`;
-      lastX = c.x; lastY = c.y;
-    } else if (c.type === "C") {
-      stream += `${xPdf(ux(c.x1))} ${yPdf(uy(c.y1))} `
-              + `${xPdf(ux(c.x2))} ${yPdf(uy(c.y2))} `
-              + `${xPdf(ux(c.x))}  ${yPdf(uy(c.y))} c\n`;
-      lastX = c.x; lastY = c.y;
-    } else if (c.type === "Q") {
-      // Quadratic (P0, Q, P1) → equivalent cubic
-      // C1 = P0 + 2/3 (Q − P0)   C2 = P1 + 2/3 (Q − P1)
-      const c1x = lastX + (2 / 3) * (c.x1 - lastX);
-      const c1y = lastY + (2 / 3) * (c.y1 - lastY);
-      const c2x = c.x   + (2 / 3) * (c.x1 - c.x);
-      const c2y = c.y   + (2 / 3) * (c.y1 - c.y);
-      stream += `${xPdf(ux(c1x))} ${yPdf(uy(c1y))} `
-              + `${xPdf(ux(c2x))} ${yPdf(uy(c2y))} `
-              + `${xPdf(ux(c.x))}  ${yPdf(uy(c.y))} c\n`;
-      lastX = c.x; lastY = c.y;
-    } else if (c.type === "Z") {
-      stream += "h\n";
+  // Spread iterator handles surrogate pairs (rare for our content but safe).
+  for (const ch of text) {
+    const glyph = font.charToGlyph(ch);
+    const glyphAdvance = (glyph.advanceWidth / font.unitsPerEm) * fontSizePt;
+    if (glyph.path && glyph.path.commands.length) {
+      const path = glyph.getPath(advanceX, 0, fontSizePt);
+      let lastX = 0, lastY = 0;
+      for (const c of path.commands) {
+        const ux = (px) => xCm + px * PT_TO_CM;
+        const uy = (py) => yBaselineCm + py * PT_TO_CM;
+        if (c.type === "M") {
+          stream += `${xPdf(ux(c.x))} ${yPdf(uy(c.y))} m\n`;
+          lastX = c.x; lastY = c.y;
+        } else if (c.type === "L") {
+          stream += `${xPdf(ux(c.x))} ${yPdf(uy(c.y))} l\n`;
+          lastX = c.x; lastY = c.y;
+        } else if (c.type === "C") {
+          stream += `${xPdf(ux(c.x1))} ${yPdf(uy(c.y1))} `
+                  + `${xPdf(ux(c.x2))} ${yPdf(uy(c.y2))} `
+                  + `${xPdf(ux(c.x))}  ${yPdf(uy(c.y))} c\n`;
+          lastX = c.x; lastY = c.y;
+        } else if (c.type === "Q") {
+          const c1x = lastX + (2 / 3) * (c.x1 - lastX);
+          const c1y = lastY + (2 / 3) * (c.y1 - lastY);
+          const c2x = c.x   + (2 / 3) * (c.x1 - c.x);
+          const c2y = c.y   + (2 / 3) * (c.y1 - c.y);
+          stream += `${xPdf(ux(c1x))} ${yPdf(uy(c1y))} `
+                  + `${xPdf(ux(c2x))} ${yPdf(uy(c2y))} `
+                  + `${xPdf(ux(c.x))}  ${yPdf(uy(c.y))} c\n`;
+          lastX = c.x; lastY = c.y;
+        } else if (c.type === "Z") {
+          stream += "h\n";
+        }
+      }
+      stream += "f\n"; // fill this glyph, then start the next one fresh
     }
+    advanceX += glyphAdvance;
   }
-  // Non-zero fill (PDF default). TrueType / OpenType outlines orient
-  // outer contours one way and inner counters the other so winding sums
-  // to zero inside holes — this gives correct rings and avoids the
-  // self-cancelling artefacts even-odd produces inside Roboto Black's
-  // heavier overlapping strokes.
-  stream += "f\n";
-
   internal.write(stream);
-
-  const advanceUnits = font.getAdvanceWidth(text, fontSizePt);
-  return advanceUnits * PT_TO_CM;
+  return advanceX * PT_TO_CM;
 };
 
 // localStorage key. State shape: { pages: [...], activeIndex }.
