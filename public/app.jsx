@@ -410,37 +410,112 @@ function SpecRow({ spec, onChange, customIcons, setCustomIcons }) {
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
-// ── Roboto font data for jsPDF embedding ──────────────────────────
-//    jsPDF only ships Helvetica/Times/Courier. To get real Roboto in
-//    the exported PDF (not a Helvetica substitution), we fetch the
-//    static TTFs as base64 once, then attach them to every jsPDF
-//    instance via addFileToVFS + addFont before drawing text.
-let __robotoFontCache = null;
+// ── Roboto fonts parsed via opentype.js for vector-outline PDF text ──
+//    Earlier we let jsPDF embed Roboto TTFs and call pdf.text(). That
+//    triggered three things print shops / Illustrator hated:
+//      1. subset-font CMAP bugs in jsPDF 2.5.1 occasionally remapped
+//         glyphs (the printed "M" came out as a thin slash)
+//      2. the embedded subset uses a synthesised PostScript name
+//         (e.g. "ABCDEF+Roboto-Regular"), so Illustrator sees a font
+//         it doesn't know and reports it as missing even when Roboto
+//         is installed locally
+//      3. registering two styles under one family ("Roboto" normal +
+//         "Roboto" black) made Illustrator collapse them into one
+//         font dictionary
+//    Outlining the text to vector paths sidesteps all of it: the PDF
+//    contains shapes, not glyphs, so there's no font to be missing,
+//    no subset to corrupt, and the printer / Illustrator both see
+//    the exact path data.
+let __robotoOpentypeCache = null;
 const __loadRobotoForPdf = async () => {
-  if (__robotoFontCache) return __robotoFontCache;
-  const fetchB64 = async (path) => {
-    const resp = await fetch(path);
-    if (!resp.ok) throw new Error("Failed to load " + path + ": " + resp.status);
-    const blob = await resp.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result).split(",")[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-  const [reg, black] = await Promise.all([
-    fetchB64("fonts/Roboto-Regular.ttf"),
-    fetchB64("fonts/Roboto-Black.ttf"),
+  if (__robotoOpentypeCache) return __robotoOpentypeCache;
+  if (!window.opentype) {
+    throw new Error("opentype.js not loaded yet — wait for the page to settle and try again");
+  }
+  const [regBuf, blackBuf] = await Promise.all([
+    fetch("fonts/Roboto-Regular.ttf").then(r => {
+      if (!r.ok) throw new Error("Roboto-Regular.ttf " + r.status);
+      return r.arrayBuffer();
+    }),
+    fetch("fonts/Roboto-Black.ttf").then(r => {
+      if (!r.ok) throw new Error("Roboto-Black.ttf " + r.status);
+      return r.arrayBuffer();
+    }),
   ]);
-  __robotoFontCache = { reg, black };
-  return __robotoFontCache;
+  __robotoOpentypeCache = {
+    regular: window.opentype.parse(regBuf),
+    black:   window.opentype.parse(blackBuf),
+  };
+  return __robotoOpentypeCache;
 };
-const __registerRoboto = (pdf, fonts) => {
-  pdf.addFileToVFS("Roboto-Regular.ttf", fonts.reg);
-  pdf.addFont("Roboto-Regular.ttf", "Roboto", "normal");
-  pdf.addFileToVFS("Roboto-Black.ttf", fonts.black);
-  pdf.addFont("Roboto-Black.ttf", "Roboto", "black");
+
+// Draw outlined text into jsPDF as a single filled compound path using
+// even-odd winding. Required so glyphs with inside-holes (O, A, D, e, o,
+// p, etc.) render as rings, not solid blobs. jsPDF's pdf.lines() fills
+// each contour independently — the inner counter contour ends up filled
+// too. By emitting raw PDF stream operators (m / l / c / h / f*) we can
+// put every glyph contour into one path and rely on PDF's even-odd rule.
+// Coordinates are in cm; fontSizeCm is the desired text size; the caller
+// is expected to have set the fill colour beforehand (CMYK supported).
+// Returns the rendered advance width in cm so callers can centre-align.
+const __drawTextAsPaths = (pdf, text, xCm, yBaselineCm, fontSizeCm, font) => {
+  if (!text || !font) return 0;
+  const fontSizePt = fontSizeCm * 28.3465;
+  const PT_TO_CM = 1 / 28.3465;
+  const path = font.getPath(text, 0, 0, fontSizePt);
+  const cmds = path.commands;
+  if (!cmds.length) return 0;
+
+  const internal = pdf.internal;
+  const sf = internal.scaleFactor; // user-unit → pt
+  const pageH = internal.pageSize.getHeight();
+  const xPdf = (uCm) => (uCm * sf).toFixed(3);
+  // PDF user space puts origin at bottom-left; jsPDF gives us a top-left
+  // origin so callers can work in design-space. Flip Y for raw stream.
+  const yPdf = (uCm) => ((pageH - uCm) * sf).toFixed(3);
+
+  let stream = "";
+  let lastX = 0, lastY = 0;       // track current point for Q→C conversion
+  for (const c of cmds) {
+    const ux = (px) => xCm + px * PT_TO_CM;
+    const uy = (py) => yBaselineCm + py * PT_TO_CM;
+    if (c.type === "M") {
+      stream += `${xPdf(ux(c.x))} ${yPdf(uy(c.y))} m\n`;
+      lastX = c.x; lastY = c.y;
+    } else if (c.type === "L") {
+      stream += `${xPdf(ux(c.x))} ${yPdf(uy(c.y))} l\n`;
+      lastX = c.x; lastY = c.y;
+    } else if (c.type === "C") {
+      stream += `${xPdf(ux(c.x1))} ${yPdf(uy(c.y1))} `
+              + `${xPdf(ux(c.x2))} ${yPdf(uy(c.y2))} `
+              + `${xPdf(ux(c.x))}  ${yPdf(uy(c.y))} c\n`;
+      lastX = c.x; lastY = c.y;
+    } else if (c.type === "Q") {
+      // Quadratic (P0, Q, P1) → equivalent cubic
+      // C1 = P0 + 2/3 (Q − P0)   C2 = P1 + 2/3 (Q − P1)
+      const c1x = lastX + (2 / 3) * (c.x1 - lastX);
+      const c1y = lastY + (2 / 3) * (c.y1 - lastY);
+      const c2x = c.x   + (2 / 3) * (c.x1 - c.x);
+      const c2y = c.y   + (2 / 3) * (c.y1 - c.y);
+      stream += `${xPdf(ux(c1x))} ${yPdf(uy(c1y))} `
+              + `${xPdf(ux(c2x))} ${yPdf(uy(c2y))} `
+              + `${xPdf(ux(c.x))}  ${yPdf(uy(c.y))} c\n`;
+      lastX = c.x; lastY = c.y;
+    } else if (c.type === "Z") {
+      stream += "h\n";
+    }
+  }
+  // Non-zero fill (PDF default). TrueType / OpenType outlines orient
+  // outer contours one way and inner counters the other so winding sums
+  // to zero inside holes — this gives correct rings and avoids the
+  // self-cancelling artefacts even-odd produces inside Roboto Black's
+  // heavier overlapping strokes.
+  stream += "f\n";
+
+  internal.write(stream);
+
+  const advanceUnits = font.getAdvanceWidth(text, fontSizePt);
+  return advanceUnits * PT_TO_CM;
 };
 
 // localStorage key. State shape: { pages: [...], activeIndex }.
@@ -695,12 +770,14 @@ function App() {
   const captureCardIntoPdf = useCallback(async (pdf, state) => {
     const card = document.querySelector(".datasheet");
     if (!card) return false;
-    // Embed Roboto into this PDF instance (cached after first load).
+    // Parse the Roboto fonts once; we'll draw each text run as outlined
+    // vector paths so the PDF never references a font (no missing-font
+    // warnings in Illustrator, no glyph-subset bugs in print).
+    let robotoFonts = null;
     try {
-      const fonts = await __loadRobotoForPdf();
-      __registerRoboto(pdf, fonts);
+      robotoFonts = await __loadRobotoForPdf();
     } catch (e) {
-      console.warn("Roboto font load failed; PDF will fall back to Helvetica", e);
+      console.warn("Roboto outline fonts failed to load — text will be omitted", e);
     }
     const [w, h] = state.ratio.split(":").map(Number);
     // Bleed in cm (3 mm = 0.3 cm) added to each side of the trim box.
@@ -809,33 +886,29 @@ function App() {
         pdf.triangle(pageW, 0, pageW, pageH, pageW - tw, pageH, "F");
       }
 
-      // ─── 3. Title (CMYK black, Roboto Black) ──────────────────────
-      if (titleInfo && titleInfo.text) {
-        setBlackText();
-        pdf.setFont("Roboto", "black");
-        pdf.setFontSize(titleInfo.font.cm * 10 * 2.83465);
+      // ─── 3. Title (CMYK black, Roboto Black outlined) ─────────────
+      if (titleInfo && titleInfo.text && robotoFonts) {
+        setBlackFill();
         const baselineCm = titleInfo.y + titleInfo.font.cm * 0.85;
-        pdf.text(titleInfo.text, titleInfo.x, baselineCm);
+        __drawTextAsPaths(pdf, titleInfo.text, titleInfo.x, baselineCm,
+                          titleInfo.font.cm, robotoFonts.black);
       }
 
-      // ─── 4. Subtitle (CMYK orange, Roboto Regular) ────────────────
-      if (subtitleInfo && subtitleInfo.text) {
-        setOrangeText();
-        pdf.setFont("Roboto", "normal");
-        pdf.setFontSize(subtitleInfo.font.cm * 10 * 2.83465);
+      // ─── 4. Subtitle (CMYK orange, Roboto Regular outlined) ───────
+      if (subtitleInfo && subtitleInfo.text && robotoFonts) {
+        setOrangeFill();
         const baselineCm = subtitleInfo.y + subtitleInfo.font.cm * 0.9;
-        pdf.text(subtitleInfo.text, subtitleInfo.x, baselineCm);
+        __drawTextAsPaths(pdf, subtitleInfo.text, subtitleInfo.x, baselineCm,
+                          subtitleInfo.font.cm, robotoFonts.regular);
       }
 
-      // ─── 5. Spec text rows (CMYK black, Roboto Regular) ───────────
+      // ─── 5. Spec text rows (CMYK black, Roboto Regular outlined) ─
       specTextInfos.forEach((info) => {
-        if (!info.text) return;
-        setBlackText();
-        pdf.setFont("Roboto", "normal");
-        pdf.setFontSize(info.font.cm * 10 * 2.83465);
-        // Vertically centre on the row (icon height ~6mm)
+        if (!info.text || !robotoFonts) return;
+        setBlackFill();
         const baselineCm = info.y + info.font.cm * 0.9;
-        pdf.text(info.text, info.x, baselineCm);
+        __drawTextAsPaths(pdf, info.text, info.x, baselineCm,
+                          info.font.cm, robotoFonts.regular);
       });
 
       // ─── 6. Spec icons — captured in the bitmap above; no vector overlay
@@ -896,16 +969,17 @@ function App() {
         }
       });
 
-      // ─── 9. QR label (CMYK black, Roboto Regular) ─────────────────
-      if (qrLabelInfo && qrLabelInfo.text) {
-        setBlackText();
-        pdf.setFont("Roboto", "normal");
-        pdf.setFontSize(qrLabelInfo.font.cm * 10 * 2.83465);
+      // ─── 9. QR label (CMYK black, Roboto Regular outlined) ───────
+      if (qrLabelInfo && qrLabelInfo.text && robotoFonts) {
+        setBlackFill();
         const baselineCm = qrLabelInfo.y + qrLabelInfo.font.cm * 0.9;
-        // Centre under the QR
-        const textW = pdf.getTextWidth(qrLabelInfo.text);
-        const cx = qrLabelInfo.x + (qrLabelInfo.w - textW) / 2;
-        pdf.text(qrLabelInfo.text, cx, baselineCm);
+        // Centre under the QR: measure the outlined width via the font's
+        // own advance table (matches what __drawTextAsPaths will draw).
+        const fontSizePt = qrLabelInfo.font.cm * 28.3465;
+        const textWidthCm = robotoFonts.regular.getAdvanceWidth(qrLabelInfo.text, fontSizePt) / 28.3465;
+        const cx = qrLabelInfo.x + (qrLabelInfo.w - textWidthCm) / 2;
+        __drawTextAsPaths(pdf, qrLabelInfo.text, cx, baselineCm,
+                          qrLabelInfo.font.cm, robotoFonts.regular);
       }
 
       return true;
