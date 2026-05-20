@@ -396,7 +396,10 @@
     line-height: 1.02;
     letter-spacing: -0.01em;
     color: #111;
-    margin-bottom: 1mm;
+    /* Negative bottom margin pulls the tag line up into the title's
+       empty descender space — visually tightens the pairing without
+       clipping any glyphs. */
+    margin-bottom: -1mm;
     text-transform: uppercase;
   }
   .ds-subtitle {
