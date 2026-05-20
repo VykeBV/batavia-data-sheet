@@ -542,6 +542,25 @@ if (typeof window !== "undefined" && window.ICON_LIBRARY && !window.ICON_LIBRARY
 }
 
 const STORAGE_KEY = "batavia-datasheet-state-v1";
+
+// Currently-supported print sizes. Any stored ratio that doesn't match
+// one of these gets remapped to its modern equivalent on load so a
+// stale localStorage entry (e.g. "20:9.5" from the pre-10×10 layout)
+// can't poison the canvas/export size mismatch.
+const VALID_RATIOS = ["10:10", "20:10"];
+const sanitizeRatio = (r) => {
+  if (typeof r === "string" && VALID_RATIOS.includes(r)) return r;
+  if (typeof r === "string") {
+    const w = parseFloat(r.split(":")[0]);
+    if (w >= 20) return "20:10";  // 20:9.5, 20:9, etc. → 20:10
+    if (w > 0)  return "10:10";   // 10:9.5, 10:9, etc. → 10:10
+  }
+  return DEFAULTS.ratio;
+};
+const sanitizePage = (p) => p && typeof p === "object"
+  ? { ...DEFAULTS, ...p, ratio: sanitizeRatio(p.ratio) }
+  : { ...DEFAULTS };
+
 const loadInitialAppState = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -549,13 +568,13 @@ const loadInitialAppState = () => {
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.pages) && parsed.pages.length) {
         return {
-          pages: parsed.pages,
+          pages: parsed.pages.map(sanitizePage),
           activeIndex: Math.max(0, Math.min(parsed.activeIndex || 0, parsed.pages.length - 1)),
         };
       }
       // Old format: a single page object stored at the root.
       if (parsed && typeof parsed === "object" && parsed.title !== undefined) {
-        return { pages: [{ ...DEFAULTS, ...parsed }], activeIndex: 0 };
+        return { pages: [sanitizePage(parsed)], activeIndex: 0 };
       }
     }
   } catch (e) { /* ignore — fall through to defaults */ }
@@ -672,7 +691,7 @@ function App() {
     const out = {};
     if (row.title != null) out.title = row.title;
     if (row.subtitle != null) out.subtitle = row.subtitle;
-    if (row.ratio) out.ratio = row.ratio;
+    if (row.ratio) out.ratio = sanitizeRatio(row.ratio);
     if (row.accent) out.accent = row.accent;
     if (row.qrUrl != null) out.qrUrl = row.qrUrl;
     if (row.qrLabel != null) out.qrLabel = row.qrLabel;
