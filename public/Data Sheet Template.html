@@ -747,6 +747,71 @@
   .icon-tile.is-custom:hover .icon-tile-remove { opacity: 1; }
   .icon-tile-remove:hover { background: #9DC9E8; color: #000; }
 
+  /* ─── Paste-SVG inline panel ──────────────────────────────────────── */
+  .icon-picker-paste {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .icon-picker-paste-field {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: rgba(255, 255, 255, 0.92);
+    font: 10.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    outline: none;
+    resize: vertical;
+    min-height: 70px;
+    max-height: 180px;
+  }
+  .icon-picker-paste-field::placeholder {
+    color: rgba(255, 255, 255, 0.35);
+    font-family: "Inter", "Roboto", system-ui, -apple-system, sans-serif;
+  }
+  .icon-picker-paste-field:focus {
+    border-color: #9DC9E8;
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 0 0 3px rgba(157, 201, 232, 0.12);
+  }
+  .icon-picker-paste-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .icon-picker-paste-cancel,
+  .icon-picker-paste-add {
+    appearance: none;
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: 700 10.5px/1 "Inter", "Roboto", system-ui, sans-serif;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+  }
+  .icon-picker-paste-cancel {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+  }
+  .icon-picker-paste-cancel:hover {
+    background: rgba(157, 201, 232, 0.18);
+    color: #fff;
+  }
+  .icon-picker-paste-add {
+    background: linear-gradient(180deg, #9DC9E8, #7FB6DC);
+    color: #000;
+  }
+  .icon-picker-paste-add:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .icon-picker-paste-add:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+
   .icon-picker-tip {
     margin-top: 10px;
     padding: 10px 12px;

@@ -211,6 +211,54 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
     setTimeout(() => setCopied(false), 1200);
   };
 
+  // Normalise any pasted/uploaded SVG so it plays nicely with the
+  // datasheet: strip outer dimensions / style (e.g. Flaticon's
+  // width="512" height="512"), replace every colour with currentColor
+  // so the icon picks up the spec-row colour, and clean up empty
+  // <g></g> wrappers that Flaticon's exports sprinkle in.
+  const normalizeSvgCode = (raw) => {
+    let svg = String(raw || "").trim();
+    if (!svg) return "";
+    // Drop XML / DOCTYPE prologues.
+    svg = svg.replace(/<\?xml[^>]*\?>/g, "").replace(/<!DOCTYPE[^>]*>/g, "").trim();
+    // Strip layout-poisoning attrs on the OUTER <svg> only — let CSS size.
+    svg = svg.replace(/<svg\b([^>]*)>/i, (_, attrs) => {
+      const cleaned = attrs
+        .replace(/\s+(width|height|enable-background)="[^"]*"/gi, "")
+        .replace(/\s+style="[^"]*"/gi, "")
+        .replace(/\s+id="[^"]*"/gi, "")
+        .replace(/\s+xml:space="[^"]*"/gi, "")
+        .replace(/\s+version="[^"]*"/gi, "")
+        .replace(/\s+x="[^"]*"/gi, "")
+        .replace(/\s+y="[^"]*"/gi, "");
+      return `<svg${cleaned}>`;
+    });
+    // Colour normalisation — attributes.
+    svg = svg.replace(/\bfill="(?!none\b|currentColor\b)[^"]*"/gi, 'fill="currentColor"');
+    svg = svg.replace(/\bstroke="(?!none\b|currentColor\b)[^"]*"/gi, 'stroke="currentColor"');
+    // Colour normalisation — inline styles.
+    svg = svg.replace(/fill\s*:\s*(?!none|currentColor)[^;"]+/gi, "fill:currentColor");
+    svg = svg.replace(/stroke\s*:\s*(?!none|currentColor)[^;"]+/gi, "stroke:currentColor");
+    // Strip empty wrapper groups (Flaticon dumps many).
+    let prev;
+    do { prev = svg; svg = svg.replace(/<g\s*>\s*<\/g>/g, ""); } while (svg !== prev);
+    return svg.trim();
+  };
+
+  const addCustomIcon = (rawSvg, labelHint) => {
+    const svg = normalizeSvgCode(rawSvg);
+    if (!svg || !/<svg\b/i.test(svg)) {
+      alert("That doesn't look like valid SVG markup. Paste the full <svg>…</svg> block.");
+      return false;
+    }
+    const key = "custom_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const label = (labelHint || "Custom").slice(0, 18);
+    setCustomIcons([...(customIcons || []), { key, label, svg }]);
+    onChange(key);
+    onClose();
+    return true;
+  };
+
   const onPickFile = (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -221,19 +269,19 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
     }
     const reader = new FileReader();
     reader.onload = () => {
-      let svg = String(reader.result || "").trim();
-      svg = svg.replace(/<\?xml[^>]*\?>/g, "").replace(/<!DOCTYPE[^>]*>/g, "").trim();
-      svg = svg
-        .replace(/\bfill="(?!none\b)[^"]*"/gi, 'fill="currentColor"')
-        .replace(/\bstroke="(?!none\b)[^"]*"/gi, 'stroke="currentColor"');
-      const key = "custom_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const label = file.name.replace(/\.svg$/i, "").slice(0, 16) || "Custom";
-      const next = [...(customIcons || []), { key, label, svg }];
-      setCustomIcons(next);
-      onChange(key);
-      onClose();
+      addCustomIcon(String(reader.result || ""), file.name.replace(/\.svg$/i, ""));
     };
     reader.readAsText(file);
+  };
+
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const pasteRef = useRef(null);
+  const onAddPasted = () => {
+    if (addCustomIcon(pasteText, "Pasted")) {
+      setPasteText("");
+      setPasteOpen(false);
+    }
   };
 
   const removeCustom = (key, e) => {
@@ -324,7 +372,7 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
         )}
 
         <div className="icon-picker-group">
-          <div className="icon-picker-group-hd">Upload</div>
+          <div className="icon-picker-group-hd">Add custom</div>
           <div className="icon-picker-grid">
             <button
               className="icon-tile icon-tile-add"
@@ -339,6 +387,24 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
               </span>
               <span className="icon-tile-label">Upload SVG</span>
             </button>
+            <button
+              className="icon-tile icon-tile-add"
+              title="Paste raw SVG code (e.g. from Flaticon)"
+              onClick={() => {
+                setPasteOpen((v) => !v);
+                setTimeout(() => pasteRef.current?.focus(), 0);
+              }}
+            >
+              <span className="icon-tile-svg">
+                <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="10" y="4" width="12" height="4" rx="1.2" />
+                  <path d="M22 6 h3 a2 2 0 0 1 2 2 v18 a2 2 0 0 1 -2 2 H7 a2 2 0 0 1 -2 -2 V8 a2 2 0 0 1 2 -2 h3" />
+                  <line x1="10" y1="15" x2="22" y2="15" />
+                  <line x1="10" y1="20" x2="19" y2="20" />
+                </svg>
+              </span>
+              <span className="icon-tile-label">Paste SVG</span>
+            </button>
             <input
               ref={fileRef}
               type="file"
@@ -347,6 +413,32 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
               onChange={onPickFile}
             />
           </div>
+          {pasteOpen && (
+            <div className="icon-picker-paste">
+              <textarea
+                ref={pasteRef}
+                className="icon-picker-paste-field"
+                placeholder="Paste full <svg>…</svg> markup here. Colours and width / height get normalised automatically."
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                spellCheck={false}
+                rows={5}
+              />
+              <div className="icon-picker-paste-actions">
+                <button
+                  type="button"
+                  className="icon-picker-paste-cancel"
+                  onClick={() => { setPasteOpen(false); setPasteText(""); }}
+                >Cancel</button>
+                <button
+                  type="button"
+                  className="icon-picker-paste-add"
+                  onClick={onAddPasted}
+                  disabled={!pasteText.trim()}
+                >Add icon</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
