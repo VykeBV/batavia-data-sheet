@@ -17,8 +17,10 @@ const DEFAULTS = /*EDITMODE-BEGIN*/{
   "qrUrl": "https://example.com",
   "qrLabel": "SCAN ME",
   "showTriangle": true,
-  "showQr": true,
-  "customIcons": []
+  "showQr": true
+  /* customIcons is shared across every page, so it lives on appState
+     (not in DEFAULTS / per-page). The pre-multi-page builds stored it
+     here; the migration code in loadInitialAppState hoists those out. */
 }/*EDITMODE-END*/;
 
 // ─── Editable text — click to edit inline ─────────────────────────────────────
@@ -649,9 +651,26 @@ const sanitizeRatio = (r) => {
   }
   return DEFAULTS.ratio;
 };
-const sanitizePage = (p) => p && typeof p === "object"
-  ? { ...DEFAULTS, ...p, ratio: sanitizeRatio(p.ratio) }
-  : { ...DEFAULTS };
+const sanitizePage = (p) => {
+  if (!p || typeof p !== "object") return { ...DEFAULTS };
+  // Strip any per-page customIcons left over from older builds — they're
+  // shared across pages now and live on appState.customIcons. The caller
+  // is responsible for hoisting them up before discarding.
+  const { customIcons, ...rest } = p;
+  return { ...DEFAULTS, ...rest, ratio: sanitizeRatio(rest.ratio) };
+};
+
+// Dedupe by .key. Returns a new array preserving the first occurrence of
+// each key.
+const dedupeIcons = (icons) => {
+  const seen = new Set();
+  const out = [];
+  for (const ic of (icons || [])) {
+    if (!ic || !ic.key || seen.has(ic.key)) continue;
+    seen.add(ic.key); out.push(ic);
+  }
+  return out;
+};
 
 const loadInitialAppState = () => {
   try {
@@ -659,18 +678,29 @@ const loadInitialAppState = () => {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.pages) && parsed.pages.length) {
+        // Collect customIcons from top-level (new shape) AND from any
+        // page that still carries them from a pre-promotion save.
+        const collected = [
+          ...(parsed.customIcons || []),
+          ...parsed.pages.flatMap(p => p?.customIcons || []),
+        ];
         return {
           pages: parsed.pages.map(sanitizePage),
           activeIndex: Math.max(0, Math.min(parsed.activeIndex || 0, parsed.pages.length - 1)),
+          customIcons: dedupeIcons(collected),
         };
       }
       // Old format: a single page object stored at the root.
       if (parsed && typeof parsed === "object" && parsed.title !== undefined) {
-        return { pages: [sanitizePage(parsed)], activeIndex: 0 };
+        return {
+          pages: [sanitizePage(parsed)],
+          activeIndex: 0,
+          customIcons: dedupeIcons(parsed.customIcons),
+        };
       }
     }
   } catch (e) { /* ignore — fall through to defaults */ }
-  return { pages: [{ ...DEFAULTS }], activeIndex: 0 };
+  return { pages: [{ ...DEFAULTS }], activeIndex: 0, customIcons: [] };
 };
 
 function App() {
@@ -681,6 +711,15 @@ function App() {
   const pages = appState.pages;
   const activeIndex = appState.activeIndex;
   const t = pages[activeIndex];
+  // Shared library of user-uploaded / pasted icons, available on every page.
+  const customIcons = appState.customIcons || [];
+  const setCustomIcons = useCallback((updater) => {
+    setAppState(prev => {
+      const cur = prev.customIcons || [];
+      const next = typeof updater === "function" ? updater(cur) : updater;
+      return { ...prev, customIcons: dedupeIcons(next) };
+    });
+  }, []);
 
   const setTweak = useCallback((keyOrEdits, val) => {
     const edits = typeof keyOrEdits === "object" && keyOrEdits !== null
@@ -708,7 +747,7 @@ function App() {
       } else {
         newPage.title = `PAGE ${prev.pages.length + 1}`;
       }
-      return { pages: [...prev.pages, newPage], activeIndex: prev.pages.length };
+      return { ...prev, pages: [...prev.pages, newPage], activeIndex: prev.pages.length };
     });
   }, []);
 
@@ -719,7 +758,7 @@ function App() {
       let newIdx = prev.activeIndex;
       if (idx < newIdx) newIdx -= 1;
       else if (idx === newIdx) newIdx = Math.min(newIdx, newPages.length - 1);
-      return { pages: newPages, activeIndex: newIdx };
+      return { ...prev, pages: newPages, activeIndex: newIdx };
     });
   }, []);
 
@@ -860,6 +899,7 @@ function App() {
         if (!rows.length) { alert("CSV had no data rows."); return; }
         const newPages = rows.map(row => ({ ...DEFAULTS, ...rowToPartialState(row) }));
         setAppState(prev => ({
+          ...prev,
           pages: [...prev.pages, ...newPages],
           activeIndex: prev.pages.length,  // jump to the first imported page
         }));
@@ -871,9 +911,11 @@ function App() {
   }, []);
 
   const resetState = useCallback(() => {
-    if (!window.confirm("Reset everything? This removes every page and clears all content.")) return;
-    setAppState({ pages: [{ ...DEFAULTS }], activeIndex: 0 });
-    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    if (!window.confirm("Reset everything? This removes every page and clears all content. Your uploaded custom icons are kept.")) return;
+    // Preserve the user's custom icon library — it's deliberately shared
+    // across pages, so wiping it on 'reset to defaults' would be a nasty
+    // surprise. localStorage is rewritten by the autosave effect.
+    setAppState(prev => ({ pages: [{ ...DEFAULTS }], activeIndex: 0, customIcons: prev.customIcons || [] }));
   }, []);
 
   // ── Capture the .datasheet DOM into an existing jsPDF page ──────
@@ -1435,8 +1477,8 @@ function App() {
                   <SpecRow
                     spec={spec}
                     onChange={(next) => setSpec(i, next)}
-                    customIcons={t.customIcons}
-                    setCustomIcons={(v) => setTweak("customIcons", typeof v === "function" ? v(t.customIcons || []) : v)}
+                    customIcons={customIcons}
+                    setCustomIcons={setCustomIcons}
                   />
                   <button className="spec-remove" onClick={() => removeSpec(i)} title="Remove row">×</button>
                 </div>
