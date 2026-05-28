@@ -334,45 +334,12 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
 
       <div className="icon-picker-scroll">
         {totalMatches === 0 && !placeholderEntry && (
-          <div className="icon-picker-empty">No icons match "{query}". Try a different term, or upload your own below.</div>
+          <div className="icon-picker-empty">No icons match "{query}". Try a different term, or upload your own.</div>
         )}
 
-        {placeholderEntry && (
-          <div className="icon-picker-group">
-            <div className="icon-picker-group-hd">Placeholder</div>
-            <div className="icon-picker-grid">
-              {renderTile(placeholderEntry[0], placeholderEntry[1])}
-            </div>
-          </div>
-        )}
-
-        {customMatches.length > 0 && (
-          <div className="icon-picker-group">
-            <div className="icon-picker-group-hd">Your icons</div>
-            <div className="icon-picker-grid">
-              {customMatches.map(c => renderTile(c.key, c, true))}
-            </div>
-          </div>
-        )}
-
-        {groups.map(g => (
-          <div key={g.id} className="icon-picker-group">
-            <div className="icon-picker-group-hd">{g.label}</div>
-            <div className="icon-picker-grid">
-              {g.items.map(([key, ic]) => renderTile(key, ic))}
-            </div>
-          </div>
-        ))}
-
-        {uncategorised.length > 0 && (
-          <div className="icon-picker-group">
-            <div className="icon-picker-group-hd">Other</div>
-            <div className="icon-picker-grid">
-              {uncategorised.map(([key, ic]) => renderTile(key, ic))}
-            </div>
-          </div>
-        )}
-
+        {/* Custom-icon entry points sit at the top of the picker so the
+            user doesn't have to scroll past every Batavia category to add
+            their own. The pasted-code textarea unfurls in place. */}
         <div className="icon-picker-group">
           <div className="icon-picker-group-hd">Add custom</div>
           <div className="icon-picker-grid">
@@ -442,6 +409,42 @@ function IconPicker({ value, onChange, anchor, onClose, customIcons, setCustomIc
             </div>
           )}
         </div>
+
+        {placeholderEntry && (
+          <div className="icon-picker-group">
+            <div className="icon-picker-group-hd">Placeholder</div>
+            <div className="icon-picker-grid">
+              {renderTile(placeholderEntry[0], placeholderEntry[1])}
+            </div>
+          </div>
+        )}
+
+        {customMatches.length > 0 && (
+          <div className="icon-picker-group">
+            <div className="icon-picker-group-hd">Your icons</div>
+            <div className="icon-picker-grid">
+              {customMatches.map(c => renderTile(c.key, c, true))}
+            </div>
+          </div>
+        )}
+
+        {groups.map(g => (
+          <div key={g.id} className="icon-picker-group">
+            <div className="icon-picker-group-hd">{g.label}</div>
+            <div className="icon-picker-grid">
+              {g.items.map(([key, ic]) => renderTile(key, ic))}
+            </div>
+          </div>
+        ))}
+
+        {uncategorised.length > 0 && (
+          <div className="icon-picker-group">
+            <div className="icon-picker-group-hd">Other</div>
+            <div className="icon-picker-grid">
+              {uncategorised.map(([key, ic]) => renderTile(key, ic))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="icon-picker-tip">
