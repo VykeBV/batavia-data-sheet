@@ -836,10 +836,18 @@ function App() {
     const s = String(v ?? "");
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const stateToCsv = (state) => {
-    const row = stateToRow(state);
-    const headers = Object.keys(row);
-    return headers.join(",") + "\n" + headers.map(h => csvEscape(row[h])).join(",");
+  // Build a CSV with one row per page (or a single state). The union of
+  // keys across all rows becomes the header so every page's columns line
+  // up even when some pages have more spec slots than others.
+  const pagesToCsv = (states) => {
+    const list = Array.isArray(states) ? states : [states];
+    const rows = list.map(stateToRow);
+    const headers = Array.from(rows.reduce((set, r) => {
+      Object.keys(r).forEach(k => set.add(k));
+      return set;
+    }, new Set()));
+    const body = rows.map(r => headers.map(h => csvEscape(r[h] ?? "")).join(","));
+    return headers.join(",") + "\n" + body.join("\n");
   };
   // Robust CSV row parser (handles quoted commas, escaped quotes, CRLF)
   const parseCsv = (text) => {
@@ -874,16 +882,19 @@ function App() {
   };
 
   const exportCsv = useCallback(() => {
-    const csv = stateToCsv(t);
+    // Export every page as one row each — round-trips through 'Import CSV →
+    // pages' to recreate the whole deck.
+    const csv = pagesToCsv(pages);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = (t.title || "datasheet").replace(/[^a-z0-9 \-_]/gi, "").trim() + ".csv";
+    const stamp = `${pages.length} page${pages.length === 1 ? "" : "s"}`;
+    a.download = `datasheets (${stamp}).csv`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
-  }, [t]);
+  }, [pages]);
 
   const csvInputRef = useRef(null);
 
@@ -1635,7 +1646,11 @@ function App() {
             onClick={exportAllPages}
           />
         )}
-        <TweakButton label="Export CSV" onClick={exportCsv} secondary />
+        <TweakButton
+          label={`Export CSV (${pages.length} page${pages.length === 1 ? "" : "s"})`}
+          onClick={exportCsv}
+          secondary
+        />
         <TweakButton label="Reset to defaults" onClick={resetState} secondary />
         <input
           ref={csvInputRef}
