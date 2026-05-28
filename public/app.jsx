@@ -800,25 +800,84 @@ const __drawSvgIconAsPaths = (pdf, svgEl, rectCm) => {
     return cubics;
   };
 
+  // Read fill / stroke / stroke-width / stroke-linecap / stroke-linejoin /
+  // stroke-dasharray from an element, checking both the inline style="…"
+  // attribute (which the Batavia icon set uses heavily) and the
+  // presentation attributes (fill="…", stroke="…", …) used by hand-
+  // authored or Flaticon-style icons. Inline style wins over the
+  // presentation attribute for the same property (matches SVG cascade).
+  const parseStyleAttr = (s) => {
+    const out = {};
+    if (!s) return out;
+    for (const part of s.split(";")) {
+      const m = part.match(/^\s*([a-z-]+)\s*:\s*(.+?)\s*$/i);
+      if (m) out[m[1].toLowerCase()] = m[2];
+    }
+    return out;
+  };
+  const STYLE_KEYS = ["fill", "stroke", "stroke-width",
+                      "stroke-linecap", "stroke-linejoin", "stroke-dasharray"];
+  const readStyle = (node) => {
+    const ss = parseStyleAttr(node.getAttribute && node.getAttribute("style"));
+    const out = {};
+    for (const k of STYLE_KEYS) {
+      if (ss[k] !== undefined) out[k] = ss[k];
+      else {
+        const v = node.getAttribute && node.getAttribute(k);
+        if (v != null && v !== "") out[k] = v;
+      }
+    }
+    return out;
+  };
+  // SVG presentation attributes inherit down the tree — a <g stroke="…"
+  // stroke-width="…"> applies to every shape below it that doesn't
+  // override the property. Own values override inherited.
+  const mergeStyle = (own, inh) => {
+    const out = {};
+    for (const k of STYLE_KEYS) out[k] = own[k] !== undefined ? own[k] : inh[k];
+    return out;
+  };
+  // Uniform scale extracted from a 2×3 affine matrix — used to convert
+  // a stroke-width from the path's local user space into viewBox units
+  // (so a path with transform="matrix(.1,…)" stroke-width="3" renders
+  // with a 0.3-unit visual stroke). Non-uniform scales degrade to the
+  // geometric mean; our icons are all uniform so this is exact.
+  const matScale = (T) => {
+    const det = T[0] * T[3] - T[1] * T[2];
+    return Math.sqrt(Math.abs(det)) || 1;
+  };
+
   let stream = "";
 
-  const emitPath = (dStr, T) => {
+  const emitPath = (dStr, T, st) => {
+    // Resolve final paint state. SVG defaults: fill=black, stroke=none.
+    const fillSpec = st.fill !== undefined ? st.fill : "currentColor";
+    const strokeSpec = st.stroke !== undefined ? st.stroke : "none";
+    const fillOn = fillSpec !== "none";
+    const strokeOn = strokeSpec !== "none";
+    if (!fillOn && !strokeOn) return;
+    // Skip dashed strokes (the _blank placeholder uses stroke-dasharray
+    // as an editor-only "click me" cue and shouldn't appear in print).
+    if (st["stroke-dasharray"] && st["stroke-dasharray"] !== "none") return;
+
     const cmds = parsePathD(dStr);
     if (!cmds.length) return;
+
     let curX = 0, curY = 0;
     let startX = 0, startY = 0;
-    let prevCCtrl = null;   // last cubic ctrl for S/s smoothing
-    let prevQCtrl = null;   // last quad ctrl for T/t smoothing
+    let prevCCtrl = null;
+    let prevQCtrl = null;
     let hasGeometry = false;
+    let local = "";
     const m = (px, py) => {
       const [tx, ty] = apply(T, px, py);
       const [cx, cy] = toCmXY(tx, ty);
-      stream += `${xPdf(cx)} ${yPdf(cy)} m\n`;
+      local += `${xPdf(cx)} ${yPdf(cy)} m\n`;
     };
     const l = (px, py) => {
       const [tx, ty] = apply(T, px, py);
       const [cx, cy] = toCmXY(tx, ty);
-      stream += `${xPdf(cx)} ${yPdf(cy)} l\n`;
+      local += `${xPdf(cx)} ${yPdf(cy)} l\n`;
     };
     const cu = (x1, y1, x2, y2, x, y) => {
       const [t1x, t1y] = apply(T, x1, y1);
@@ -827,7 +886,7 @@ const __drawSvgIconAsPaths = (pdf, svgEl, rectCm) => {
       const [c1x, c1y] = toCmXY(t1x, t1y);
       const [c2x, c2y] = toCmXY(t2x, t2y);
       const [cx, cy]   = toCmXY(tx, ty);
-      stream += `${xPdf(c1x)} ${yPdf(c1y)} ${xPdf(c2x)} ${yPdf(c2y)} ${xPdf(cx)} ${yPdf(cy)} c\n`;
+      local += `${xPdf(c1x)} ${yPdf(c1y)} ${xPdf(c2x)} ${yPdf(c2y)} ${xPdf(cx)} ${yPdf(cy)} c\n`;
     };
     for (const { c, a } of cmds) {
       const k = c.toUpperCase();
@@ -895,44 +954,54 @@ const __drawSvgIconAsPaths = (pdf, svgEl, rectCm) => {
         prevCCtrl = null; prevQCtrl = null;
         curX = x; curY = y;
       } else if (k === "Z") {
-        stream += "h\n";
+        local += "h\n";
         curX = startX; curY = startY;
         prevCCtrl = null; prevQCtrl = null;
       }
     }
-    if (hasGeometry) stream += "f\n";   // non-zero fill, like text outlines
+    if (!hasGeometry) return;
+
+    // Stroke-state prefix (must come BEFORE the path-construction ops).
+    // Width is in path-local user units → convert to PDF units by
+    // baking in the matrix scale, viewBox-to-cm scale, and the
+    // jsPDF cm-to-PDF scale factor. CMYK black for the stroke,
+    // matching the fill colour the caller set on the page.
+    let prefix = "";
+    if (strokeOn) {
+      const sw = parseFloat(st["stroke-width"]);
+      const swUser = isNaN(sw) ? 1 : sw;
+      const widthPdf = swUser * matScale(T) * scale * sf;
+      prefix += `0 0 0 1 K\n${widthPdf.toFixed(3)} w\n`;
+      const cap = st["stroke-linecap"];
+      if (cap === "round") prefix += "1 J\n";
+      else if (cap === "square") prefix += "2 J\n";
+      const join = st["stroke-linejoin"];
+      if (join === "round") prefix += "1 j\n";
+      else if (join === "bevel") prefix += "2 j\n";
+    }
+    const paintOp = fillOn && strokeOn ? "B" : fillOn ? "f" : "S";
+    stream += prefix + local + paintOp + "\n";
   };
 
-  // SVG fill inherits down the tree, so an outer <svg fill="none"> applies
-  // to every shape inside even when each shape omits its own fill attr.
-  // Track inherited fill-none state through the walk so stroke-only
-  // icons (the _blank dashed placeholder, Lucide-style outlines that
-  // users might paste) don't print as solid black blocks.
-  const walk = (node, T, inheritedFillNone) => {
+  const walk = (node, T, inhStyle) => {
     if (!node || node.nodeType !== 1) return;
     const tag = (node.tagName || "").toLowerCase();
     const localT = parseTransform(node.getAttribute && node.getAttribute("transform"));
     const cur = localT ? matMul(T, localT) : T;
-    const fillAttr = node.getAttribute && node.getAttribute("fill");
-    const styleStr = (node.getAttribute && node.getAttribute("style")) || "";
-    const ownFillNone = fillAttr === "none" || /fill\s*:\s*none/i.test(styleStr);
-    const ownFillSet  = !!fillAttr || /(^|;)\s*fill\s*:/i.test(styleStr);
-    // A node's effective fill is "none" if it explicitly says so, or if
-    // it inherited "none" AND didn't override with its own fill.
-    const isFillNone = ownFillNone || (inheritedFillNone && !ownFillSet);
+    const own = readStyle(node);
+    const eff = mergeStyle(own, inhStyle);
     if (tag === "path") {
-      if (isFillNone) return;
       const d = node.getAttribute("d");
-      if (d) emitPath(d, cur);
-    } else if (tag === "rect" && !isFillNone) {
+      if (d) emitPath(d, cur, eff);
+    } else if (tag === "rect") {
       const x = +(node.getAttribute("x") || 0);
       const y = +(node.getAttribute("y") || 0);
       const w = +(node.getAttribute("width") || 0);
       const h = +(node.getAttribute("height") || 0);
       if (w > 0 && h > 0) {
-        emitPath(`M${x} ${y}h${w}v${h}h${-w}z`, cur);
+        emitPath(`M${x} ${y}h${w}v${h}h${-w}z`, cur, eff);
       }
-    } else if (tag === "circle" && !isFillNone) {
+    } else if (tag === "circle") {
       const cx = +(node.getAttribute("cx") || 0);
       const cy = +(node.getAttribute("cy") || 0);
       const r  = +(node.getAttribute("r") || 0);
@@ -943,9 +1012,9 @@ const __drawSvgIconAsPaths = (pdf, svgEl, rectCm) => {
           `C${cx - r} ${cy - r*k} ${cx - r*k} ${cy - r} ${cx} ${cy - r}` +
           `C${cx + r*k} ${cy - r} ${cx + r} ${cy - r*k} ${cx + r} ${cy}` +
           `C${cx + r} ${cy + r*k} ${cx + r*k} ${cy + r} ${cx} ${cy + r}` +
-          `C${cx - r*k} ${cy + r} ${cx - r} ${cy + r*k} ${cx - r} ${cy}z`, cur);
+          `C${cx - r*k} ${cy + r} ${cx - r} ${cy + r*k} ${cx - r} ${cy}z`, cur, eff);
       }
-    } else if (tag === "ellipse" && !isFillNone) {
+    } else if (tag === "ellipse") {
       const cx = +(node.getAttribute("cx") || 0);
       const cy = +(node.getAttribute("cy") || 0);
       const rx = +(node.getAttribute("rx") || 0);
@@ -957,22 +1026,22 @@ const __drawSvgIconAsPaths = (pdf, svgEl, rectCm) => {
           `C${cx - rx} ${cy - ry*k} ${cx - rx*k} ${cy - ry} ${cx} ${cy - ry}` +
           `C${cx + rx*k} ${cy - ry} ${cx + rx} ${cy - ry*k} ${cx + rx} ${cy}` +
           `C${cx + rx} ${cy + ry*k} ${cx + rx*k} ${cy + ry} ${cx} ${cy + ry}` +
-          `C${cx - rx*k} ${cy + ry} ${cx - rx} ${cy + ry*k} ${cx - rx} ${cy}z`, cur);
+          `C${cx - rx*k} ${cy + ry} ${cx - rx} ${cy + ry*k} ${cx - rx} ${cy}z`, cur, eff);
       }
-    } else if ((tag === "polygon" || tag === "polyline") && !isFillNone) {
+    } else if (tag === "polygon" || tag === "polyline") {
       const pts = (node.getAttribute("points") || "").trim().split(/[\s,]+/).map(Number);
       if (pts.length >= 4) {
         let d = `M${pts[0]} ${pts[1]}`;
         for (let i = 2; i + 1 < pts.length; i += 2) d += `L${pts[i]} ${pts[i+1]}`;
         if (tag === "polygon") d += "z";
-        emitPath(d, cur);
+        emitPath(d, cur, eff);
       }
     } else if (tag === "g" || tag === "svg" || tag === "symbol") {
-      for (let i = 0; i < node.children.length; i++) walk(node.children[i], cur, isFillNone);
+      for (let i = 0; i < node.children.length; i++) walk(node.children[i], cur, eff);
     }
   };
 
-  walk(svgEl, [1, 0, 0, 1, 0, 0], false);
+  walk(svgEl, [1, 0, 0, 1, 0, 0], {});
   if (stream) pdf.internal.write(stream);
 };
 
