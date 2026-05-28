@@ -1280,8 +1280,21 @@ endobj
     const llx = parseFloat(mbM[1]), lly = parseFloat(mbM[2]);
     const urx = parseFloat(mbM[3]), ury = parseFloat(mbM[4]);
     const bleedPt = ((opts.pages[i] && opts.pages[i].bleedCm) || 0) * 28.3465;
-    const fmt = (n) => n.toFixed(3);
-    const trim = `/TrimBox [${fmt(llx + bleedPt)} ${fmt(lly + bleedPt)} ${fmt(urx - bleedPt)} ${fmt(ury - bleedPt)}]`;
+    let trim;
+    if (bleedPt > 0) {
+      // For the bleed case the inset is large enough (≥ 8 pt) that any
+      // 0.0005-pt toFixed rounding can never push TrimBox outside
+      // BleedBox / MediaBox.
+      const fmt = (n) => n.toFixed(3);
+      trim = `/TrimBox [${fmt(llx + bleedPt)} ${fmt(lly + bleedPt)} ${fmt(urx - bleedPt)} ${fmt(ury - bleedPt)}]`;
+    } else {
+      // No bleed → TrimBox must equal MediaBox. toFixed(3) on a value
+      // like 283.4645669… rounds UP to 283.465, which then exceeds the
+      // unrounded MediaBox by 0.0004 pt — Acrobat flags it as "Page
+      // boxes not nested properly". Reuse the verbatim MediaBox tokens
+      // so the two boxes are byte-identical.
+      trim = `/TrimBox [${mbM[1]} ${mbM[2]} ${mbM[3]} ${mbM[4]}]`;
+    }
     const bleed = bleedPt > 0
       ? `\n/BleedBox [${mbM[1]} ${mbM[2]} ${mbM[3]} ${mbM[4]}]` : "";
     let newBody = body;
