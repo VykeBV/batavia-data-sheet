@@ -842,9 +842,18 @@ function App() {
   // Build a CSV with one row per page (or a single state). The union of
   // keys across all rows becomes the header so every page's columns line
   // up even when some pages have more spec slots than others.
-  const pagesToCsv = (states) => {
+  //
+  // The shared custom-icon library travels along as a JSON blob in the
+  // _customIcons column on the FIRST row only — large strings (full SVG
+  // markup) get embedded once and round-trip cleanly through CSV
+  // quoting. Empty on every later row to keep file size sane.
+  const pagesToCsv = (states, customIcons) => {
     const list = Array.isArray(states) ? states : [states];
     const rows = list.map(stateToRow);
+    if (customIcons && customIcons.length) {
+      rows[0]._customIcons = JSON.stringify(customIcons);
+      for (let i = 1; i < rows.length; i++) rows[i]._customIcons = "";
+    }
     const headers = Array.from(rows.reduce((set, r) => {
       Object.keys(r).forEach(k => set.add(k));
       return set;
@@ -886,8 +895,8 @@ function App() {
 
   const exportCsv = useCallback(() => {
     // Export every page as one row each — round-trips through 'Import CSV →
-    // pages' to recreate the whole deck.
-    const csv = pagesToCsv(pages);
+    // pages' to recreate the whole deck, custom icon library included.
+    const csv = pagesToCsv(pages, customIcons);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -897,7 +906,7 @@ function App() {
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
-  }, [pages]);
+  }, [pages, customIcons]);
 
   const csvInputRef = useRef(null);
 
@@ -912,10 +921,29 @@ function App() {
         const rows = parseCsv(String(reader.result || ""));
         if (!rows.length) { alert("CSV had no data rows."); return; }
         const newPages = rows.map(row => ({ ...DEFAULTS, ...rowToPartialState(row) }));
+        // Pull the embedded custom icon library out of the first non-empty
+        // _customIcons cell (we only populate row 0 on export, but tolerate
+        // a value anywhere just in case the user edited the CSV by hand).
+        let importedIcons = [];
+        for (const row of rows) {
+          const blob = row._customIcons;
+          if (!blob || !blob.trim()) continue;
+          try {
+            const parsed = JSON.parse(blob);
+            if (Array.isArray(parsed)) {
+              importedIcons = parsed.filter(ic =>
+                ic && typeof ic === "object" && ic.key && ic.svg);
+            }
+          } catch (e) {
+            console.warn("Could not parse _customIcons cell:", e);
+          }
+          break;
+        }
         setAppState(prev => ({
           ...prev,
           pages: [...prev.pages, ...newPages],
           activeIndex: prev.pages.length,  // jump to the first imported page
+          customIcons: dedupeIcons([...(prev.customIcons || []), ...importedIcons]),
         }));
       } catch (e) {
         alert("Could not load CSV: " + e.message);
