@@ -1139,9 +1139,44 @@ const __toPdfX4 = (origBytes, opts) => {
   const pageNums = [...kidsM[1].matchAll(/(\d+)\s+\d+\s+R/g)].map((m) => parseInt(m[1], 10));
 
   // ── 6. Build the XMP packet ─────────────────────────────────────
-  const now = new Date();
-  const isoDate = now.toISOString().slice(0, 19) + "Z";
+  // Acrobat preflight enforces strict equality between Info and XMP
+  // for Producer and CreationDate, so read both from the Info object
+  // and reuse them verbatim in XMP. The same applies to ModDate (if
+  // jsPDF wrote one) — we mirror CreateDate when it didn't.
+  const infoBodyOrig = readDict(infoNum);
+  const pickInfoString = (key) => {
+    // Match  /Key (…)  allowing PDF's \( \) \) escaping inside.
+    const re = new RegExp("\\/" + key + "\\s*\\(((?:\\\\.|[^()\\\\])*)\\)");
+    const m = infoBodyOrig.match(re);
+    return m ? m[1].replace(/\\([\\()])/g, "$1") : null;
+  };
+  // PDF date "D:YYYYMMDDHHmmSSOhh'mm'" → ISO-8601 "YYYY-MM-DDTHH:mm:ss±hh:mm".
+  // Acrobat compares the two as datetimes, so the format has to be
+  // structurally valid — we don't get to slip the raw PDF string in.
+  const pdfDateToIso = (s) => {
+    if (!s) return null;
+    const m = s.match(/^D:(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})([Z+\-])?(\d{2})?'?(\d{2})?'?/);
+    if (!m) return null;
+    const [, y, mo, d, hh, mm, ss, tz, oh, om] = m;
+    let zone = "Z";
+    if (tz === "+" || tz === "-") zone = `${tz}${oh || "00"}:${om || "00"}`;
+    else if (tz === "Z" || !tz) zone = "Z";
+    return `${y}-${mo}-${d}T${hh}:${mm}:${ss}${zone}`;
+  };
+  const xmpProducer = pickInfoString("Producer") || "jsPDF";
+  const xmpCreateIso = pdfDateToIso(pickInfoString("CreationDate"))
+                       || new Date().toISOString().slice(0, 19) + "Z";
+  const xmpModifyIso = pdfDateToIso(pickInfoString("ModDate")) || xmpCreateIso;
   const safe = (opts.title || "Datasheet").replace(/[<>&"']/g, " ");
+  const xmpEsc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Document/Instance IDs as RFC-4122-ish UUIDs (32 hex chars hyphenated)
+  // so xmpMM gets the format Acrobat expects.
+  const hexToUuid = (h) => {
+    const p = (h || "").padStart(32, "0").slice(0, 32);
+    return `${p.slice(0,8)}-${p.slice(8,12)}-${p.slice(12,16)}-${p.slice(16,20)}-${p.slice(20,32)}`;
+  };
+  const docUuid = hexToUuid(docId);
+  const instUuid = hexToUuid(docIdAlt || docId);
   const xmp =
 `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="batavia-data-sheet">
@@ -1153,15 +1188,17 @@ const __toPdfX4 = (origBytes, opts) => {
         xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
         xmlns:pdfx="http://ns.adobe.com/pdfx/1.3/"
         xmlns:pdfxid="http://www.npes.org/pdfx/ns/id/">
-      <dc:title><rdf:Alt><rdf:li xml:lang="x-default">${safe}</rdf:li></rdf:Alt></dc:title>
+      <dc:title><rdf:Alt><rdf:li xml:lang="x-default">${xmpEsc(safe)}</rdf:li></rdf:Alt></dc:title>
       <dc:creator><rdf:Seq><rdf:li>Vyke Design</rdf:li></rdf:Seq></dc:creator>
-      <pdf:Producer>batavia-data-sheet (jsPDF + PDF/X-4 post-processor)</pdf:Producer>
+      <pdf:Producer>${xmpEsc(xmpProducer)}</pdf:Producer>
       <pdf:Trapped>False</pdf:Trapped>
-      <xmp:CreateDate>${isoDate}</xmp:CreateDate>
-      <xmp:ModifyDate>${isoDate}</xmp:ModifyDate>
-      <xmp:MetadataDate>${isoDate}</xmp:MetadataDate>
-      <xmpMM:DocumentID>uuid:${docId || "00000000000000000000000000000000"}</xmpMM:DocumentID>
-      <xmpMM:InstanceID>uuid:${docIdAlt || docId || "00000000000000000000000000000000"}</xmpMM:InstanceID>
+      <xmp:CreateDate>${xmpCreateIso}</xmp:CreateDate>
+      <xmp:ModifyDate>${xmpModifyIso}</xmp:ModifyDate>
+      <xmp:MetadataDate>${xmpModifyIso}</xmp:MetadataDate>
+      <xmpMM:DocumentID>uuid:${docUuid}</xmpMM:DocumentID>
+      <xmpMM:InstanceID>uuid:${instUuid}</xmpMM:InstanceID>
+      <xmpMM:VersionID>1</xmpMM:VersionID>
+      <xmpMM:RenditionClass>default</xmpMM:RenditionClass>
       <pdfx:GTS_PDFXVersion>PDF/X-4</pdfx:GTS_PDFXVersion>
       <pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>
     </rdf:Description>
@@ -1222,7 +1259,9 @@ endobj
   writeText(`${catalogNum} 0 obj\n<<\n${cat}\n>>\nendobj\n`);
 
   // 8e. Updated Info dict (add GTS_PDFXVersion + Title + Trapped).
-  let info = readDict(infoNum);
+  //     Producer / CreationDate stay as jsPDF wrote them — XMP above
+  //     mirrors those exact values so preflight's equality check passes.
+  let info = infoBodyOrig;
   if (!/\/GTS_PDFXVersion/.test(info))   info += `\n/GTS_PDFXVersion (PDF/X-4)`;
   if (!/\/Title\s/.test(info))           info += `\n/Title (${safe.replace(/[\\()]/g, "\\$&")})`;
   if (!/\/Trapped/.test(info))           info += `\n/Trapped /False`;
@@ -1230,6 +1269,10 @@ endobj
   writeText(`${infoNum} 0 obj\n<<\n${info}\n>>\nendobj\n`);
 
   // 8f. Updated Pages — add /TrimBox (and /BleedBox if bled).
+  //     BleedBox uses the MediaBox's *verbatim* numeric string so the
+  //     two boxes are byte-identical — preflight's nesting check is
+  //     strict and any floating-point rounding can trip a "not nested
+  //     properly" error.
   pageNums.forEach((pn, i) => {
     const body = readDict(pn);
     const mbM = body.match(/\/MediaBox\s*\[\s*([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s*\]/);
@@ -1240,7 +1283,7 @@ endobj
     const fmt = (n) => n.toFixed(3);
     const trim = `/TrimBox [${fmt(llx + bleedPt)} ${fmt(lly + bleedPt)} ${fmt(urx - bleedPt)} ${fmt(ury - bleedPt)}]`;
     const bleed = bleedPt > 0
-      ? `\n/BleedBox [${fmt(llx)} ${fmt(lly)} ${fmt(urx)} ${fmt(ury)}]` : "";
+      ? `\n/BleedBox [${mbM[1]} ${mbM[2]} ${mbM[3]} ${mbM[4]}]` : "";
     let newBody = body;
     if (!/\/TrimBox/.test(newBody))  newBody += `\n${trim}${bleed}`;
     newEntries.set(pn, appendPos);
@@ -1730,32 +1773,12 @@ function App() {
       },
     })) : [];
 
-    // ─── Hide everything we'll redraw as vector ─────────────────────
-    // Spec icons get hidden too — we redraw them below as filled vector
-    // paths via __drawSvgIconAsPaths so Illustrator can edit them and
-    // the print RIP rasterises at the device's native resolution rather
-    // than the bitmap's fixed PNG resolution.
-    // The cut-line marker is on-screen guidance only; it must not print.
-    const visEls = [
-      triangleEl, titleEl, subtitleEl, ...specTextEls,
-      ...specIconBtns,
-      qrSvg, qrLabelEl, ...brackets, cutLineEl,
-    ].filter(Boolean);
-    const prevVisMap = new Map();
-    visEls.forEach((el) => {
-      prevVisMap.set(el, el.style.visibility);
-      el.style.visibility = "hidden";
-    });
-
     try {
-      // ─── 1. Capture bitmap (just paper, white) ────────────────────
-      const canvas = await window.html2canvas(card, {
-        scale: 3,
-        backgroundColor: "#ffffff",
-        useCORS: true,
-        logging: false,
-      });
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, pageW, pageH, undefined, "FAST");
+      // No bitmap pass — everything below is redrawn from the measured
+      // DOM rects as CMYK vector geometry. Skipping html2canvas keeps
+      // the PDF strictly CMYK (no DeviceRGB image XObject), which is
+      // what PDF/X-4 with a CMYK OutputIntent requires, and cuts the
+      // exported file size by roughly 90 %.
 
       // CMYK setters (jsPDF expects 0–1)
       const isBlackAccent = state.accent === "#000000";
@@ -1881,9 +1904,8 @@ function App() {
       }
 
       return true;
-    } finally {
-      // Restore visibility
-      prevVisMap.forEach((v, el) => { el.style.visibility = v; });
+    } catch (e) {
+      throw e;
     }
   }, []);
 
