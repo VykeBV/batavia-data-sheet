@@ -1045,6 +1045,268 @@ const __drawSvgIconAsPaths = (pdf, svgEl, rectCm) => {
   if (stream) pdf.internal.write(stream);
 };
 
+// ── PDF/X-4 post-processing ──────────────────────────────────────────────
+// jsPDF 2.5.1 has no PDF/X support — its output is a plain PDF 1.3 file.
+// To make the export pass Acrobat's "Convert to PDF/X-4 (Coated FOGRA39)"
+// preflight as-is, we append an incremental update to the bytes that:
+//   • embeds the Coated FOGRA39 ICC profile as a stream object,
+//   • adds an OutputIntent referencing that ICC (S=GTS_PDFX),
+//   • writes an XMP metadata stream declaring PDF/X-4 conformance,
+//   • adds /GTS_PDFXVersion (PDF/X-4) to the Info dict,
+//   • adds /TrimBox (and /BleedBox if bleed > 0) to every Page.
+// Incremental update means we never rewrite the original bytes — we
+// append the changed objects, a new xref pointing at their offsets,
+// and a new trailer whose /Prev chains back to the original xref.
+let __iccCache = null;
+const __loadFogra39Icc = async () => {
+  if (__iccCache) return __iccCache;
+  const r = await fetch("CoatedFOGRA39.icc");
+  if (!r.ok) throw new Error("CoatedFOGRA39.icc " + r.status);
+  __iccCache = new Uint8Array(await r.arrayBuffer());
+  return __iccCache;
+};
+
+const __toPdfX4 = (origBytes, opts) => {
+  // opts: { title, iccBytes, pages: [{ bleedCm }] }
+  const dec = new TextDecoder("latin1");
+  const enc = new TextEncoder();
+
+  // ── 1. Locate the existing trailer / xref offset ────────────────
+  const tailStart = Math.max(0, origBytes.length - 4096);
+  const tail = dec.decode(origBytes.subarray(tailStart));
+  const sxm = tail.match(/startxref\s+(\d+)\s+%%EOF/);
+  if (!sxm) throw new Error("PDF/X-4: no startxref in trailer");
+  const oldXrefOffset = parseInt(sxm[1], 10);
+
+  // ── 2. Parse the xref subsections to learn each object's offset ─
+  const xrefArea = dec.decode(origBytes.subarray(oldXrefOffset, oldXrefOffset + 8192));
+  const xm = xrefArea.match(/^xref\s+([\s\S]+?)trailer/);
+  if (!xm) throw new Error("PDF/X-4: malformed xref");
+  const entries = new Map(); // objNum -> { offset, gen, used }
+  const xrefRe = /(\d+)\s+(\d+)\s*\n((?:\d{10}\s+\d{5}\s+[nf]\s*\n)+)/g;
+  let xrm;
+  while ((xrm = xrefRe.exec(xm[1])) !== null) {
+    const first = parseInt(xrm[1], 10);
+    const lines = xrm[3].trim().split(/\n/);
+    lines.forEach((line, i) => {
+      const lm = line.match(/(\d{10})\s+(\d{5})\s+([nf])/);
+      if (!lm) return;
+      entries.set(first + i, {
+        offset: parseInt(lm[1], 10),
+        gen: parseInt(lm[2], 10),
+        used: lm[3] === "n",
+      });
+    });
+  }
+  if (!entries.size) throw new Error("PDF/X-4: empty xref");
+
+  // ── 3. Parse the trailer dict ───────────────────────────────────
+  const tdm = xrefArea.match(/trailer\s*<<([\s\S]+?)>>/);
+  if (!tdm) throw new Error("PDF/X-4: no trailer dict");
+  const tDict = tdm[1];
+  const rootM = tDict.match(/\/Root\s+(\d+)\s+\d+\s+R/);
+  const infoM = tDict.match(/\/Info\s+(\d+)\s+\d+\s+R/);
+  const idM   = tDict.match(/\/ID\s*\[\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/);
+  if (!rootM || !infoM) throw new Error("PDF/X-4: trailer missing Root/Info");
+  const catalogNum = parseInt(rootM[1], 10);
+  const infoNum    = parseInt(infoM[1], 10);
+  const docId      = idM ? idM[1] : null;
+  const docIdAlt   = idM ? idM[2] : null;
+
+  // ── 4. Read an indirect object's dict body, stripped of <<…>> ───
+  const readDict = (objNum) => {
+    const e = entries.get(objNum);
+    if (!e) throw new Error(`PDF/X-4: object ${objNum} missing from xref`);
+    const slice = origBytes.subarray(e.offset, Math.min(origBytes.length, e.offset + 16384));
+    const txt = dec.decode(slice);
+    const head = txt.match(new RegExp("^" + objNum + "\\s+\\d+\\s+obj"));
+    if (!head) throw new Error(`PDF/X-4: bad header for object ${objNum}`);
+    const endIdx = txt.indexOf("endobj");
+    if (endIdx < 0) throw new Error(`PDF/X-4: no endobj for ${objNum}`);
+    let body = txt.slice(head[0].length, endIdx).trim();
+    const wrap = body.match(/^<<([\s\S]*)>>\s*$/);
+    return wrap ? wrap[1].trim() : body;
+  };
+
+  // ── 5. Catalog → Pages → enumerate Page objects ─────────────────
+  const catalogBody = readDict(catalogNum);
+  const pagesRefM = catalogBody.match(/\/Pages\s+(\d+)\s+\d+\s+R/);
+  if (!pagesRefM) throw new Error("PDF/X-4: catalog has no /Pages");
+  const pagesNum = parseInt(pagesRefM[1], 10);
+  const pagesBody = readDict(pagesNum);
+  const kidsM = pagesBody.match(/\/Kids\s*\[([\s\S]+?)\]/);
+  if (!kidsM) throw new Error("PDF/X-4: Pages has no /Kids");
+  const pageNums = [...kidsM[1].matchAll(/(\d+)\s+\d+\s+R/g)].map((m) => parseInt(m[1], 10));
+
+  // ── 6. Build the XMP packet ─────────────────────────────────────
+  const now = new Date();
+  const isoDate = now.toISOString().slice(0, 19) + "Z";
+  const safe = (opts.title || "Datasheet").replace(/[<>&"']/g, " ");
+  const xmp =
+`<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="batavia-data-sheet">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+        xmlns:dc="http://purl.org/dc/elements/1.1/"
+        xmlns:pdf="http://ns.adobe.com/pdf/1.3/"
+        xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+        xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
+        xmlns:pdfx="http://ns.adobe.com/pdfx/1.3/"
+        xmlns:pdfxid="http://www.npes.org/pdfx/ns/id/">
+      <dc:title><rdf:Alt><rdf:li xml:lang="x-default">${safe}</rdf:li></rdf:Alt></dc:title>
+      <dc:creator><rdf:Seq><rdf:li>Vyke Design</rdf:li></rdf:Seq></dc:creator>
+      <pdf:Producer>batavia-data-sheet (jsPDF + PDF/X-4 post-processor)</pdf:Producer>
+      <pdf:Trapped>False</pdf:Trapped>
+      <xmp:CreateDate>${isoDate}</xmp:CreateDate>
+      <xmp:ModifyDate>${isoDate}</xmp:ModifyDate>
+      <xmp:MetadataDate>${isoDate}</xmp:MetadataDate>
+      <xmpMM:DocumentID>uuid:${docId || "00000000000000000000000000000000"}</xmpMM:DocumentID>
+      <xmpMM:InstanceID>uuid:${docIdAlt || docId || "00000000000000000000000000000000"}</xmpMM:InstanceID>
+      <pdfx:GTS_PDFXVersion>PDF/X-4</pdfx:GTS_PDFXVersion>
+      <pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>
+    </rdf:Description>
+  </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+
+  // ── 7. Allocate object numbers for the appended objects ─────────
+  const origCount = Math.max(...entries.keys()) + 1;
+  let nextObj = origCount;
+  const iccObj  = nextObj++;
+  const oiObj   = nextObj++;
+  const metaObj = nextObj++;
+
+  // ── 8. Write the appended section ───────────────────────────────
+  const chunks = [];
+  let appendPos = origBytes.length;
+  const newEntries = new Map();   // objNum → byte offset
+  const writeBytes = (u8) => { chunks.push(u8); appendPos += u8.length; };
+  const writeText = (s) => writeBytes(enc.encode(s));
+  // Start the appended section on a fresh line.
+  if (origBytes[origBytes.length - 1] !== 0x0a) writeText("\n");
+
+  // 8a. ICC profile stream (4-component CMYK).
+  newEntries.set(iccObj, appendPos);
+  writeText(`${iccObj} 0 obj\n<< /N 4 /Length ${opts.iccBytes.length} >>\nstream\n`);
+  writeBytes(opts.iccBytes);
+  writeText(`\nendstream\nendobj\n`);
+
+  // 8b. OutputIntent dict.
+  newEntries.set(oiObj, appendPos);
+  writeText(
+`${oiObj} 0 obj
+<<
+/Type /OutputIntent
+/S /GTS_PDFX
+/OutputConditionIdentifier (FOGRA39)
+/OutputCondition (Coated FOGRA39 \\(ISO 12647-2:2004\\))
+/Info (Coated FOGRA39 \\(ISO 12647-2:2004\\))
+/RegistryName (http://www.color.org)
+/DestOutputProfile ${iccObj} 0 R
+>>
+endobj
+`);
+
+  // 8c. XMP metadata stream.
+  const xmpBytes = enc.encode(xmp);
+  newEntries.set(metaObj, appendPos);
+  writeText(`${metaObj} 0 obj\n<< /Type /Metadata /Subtype /XML /Length ${xmpBytes.length} >>\nstream\n`);
+  writeBytes(xmpBytes);
+  writeText(`\nendstream\nendobj\n`);
+
+  // 8d. Updated Catalog (add /Metadata + /OutputIntents).
+  let cat = catalogBody;
+  if (!/\/Metadata\s+\d+\s+\d+\s+R/.test(cat))      cat += `\n/Metadata ${metaObj} 0 R`;
+  if (!/\/OutputIntents\s*\[/.test(cat))            cat += `\n/OutputIntents [${oiObj} 0 R]`;
+  newEntries.set(catalogNum, appendPos);
+  writeText(`${catalogNum} 0 obj\n<<\n${cat}\n>>\nendobj\n`);
+
+  // 8e. Updated Info dict (add GTS_PDFXVersion + Title + Trapped).
+  let info = readDict(infoNum);
+  if (!/\/GTS_PDFXVersion/.test(info))   info += `\n/GTS_PDFXVersion (PDF/X-4)`;
+  if (!/\/Title\s/.test(info))           info += `\n/Title (${safe.replace(/[\\()]/g, "\\$&")})`;
+  if (!/\/Trapped/.test(info))           info += `\n/Trapped /False`;
+  newEntries.set(infoNum, appendPos);
+  writeText(`${infoNum} 0 obj\n<<\n${info}\n>>\nendobj\n`);
+
+  // 8f. Updated Pages — add /TrimBox (and /BleedBox if bled).
+  pageNums.forEach((pn, i) => {
+    const body = readDict(pn);
+    const mbM = body.match(/\/MediaBox\s*\[\s*([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s*\]/);
+    if (!mbM) return;
+    const llx = parseFloat(mbM[1]), lly = parseFloat(mbM[2]);
+    const urx = parseFloat(mbM[3]), ury = parseFloat(mbM[4]);
+    const bleedPt = ((opts.pages[i] && opts.pages[i].bleedCm) || 0) * 28.3465;
+    const fmt = (n) => n.toFixed(3);
+    const trim = `/TrimBox [${fmt(llx + bleedPt)} ${fmt(lly + bleedPt)} ${fmt(urx - bleedPt)} ${fmt(ury - bleedPt)}]`;
+    const bleed = bleedPt > 0
+      ? `\n/BleedBox [${fmt(llx)} ${fmt(lly)} ${fmt(urx)} ${fmt(ury)}]` : "";
+    let newBody = body;
+    if (!/\/TrimBox/.test(newBody))  newBody += `\n${trim}${bleed}`;
+    newEntries.set(pn, appendPos);
+    writeText(`${pn} 0 obj\n<<\n${newBody}\n>>\nendobj\n`);
+  });
+
+  // ── 9. New xref table — group contiguous object numbers ─────────
+  const sorted = [...newEntries.keys()].sort((a, b) => a - b);
+  const subs = [];
+  for (const n of sorted) {
+    const last = subs[subs.length - 1];
+    if (last && n === last.first + last.list.length) last.list.push(n);
+    else subs.push({ first: n, list: [n] });
+  }
+  const newXrefOffset = appendPos;
+  let xrefStr = "xref\n";
+  for (const s of subs) {
+    xrefStr += `${s.first} ${s.list.length}\n`;
+    for (const n of s.list) {
+      const off = newEntries.get(n).toString().padStart(10, "0");
+      xrefStr += `${off} 00000 n \n`;
+    }
+  }
+  writeText(xrefStr);
+
+  // ── 10. New trailer chaining back to the original xref ─────────
+  const newSize = nextObj;
+  const idStr = docId
+    ? `/ID [<${docId}> <${docIdAlt || docId}>]\n`
+    : "";
+  writeText(
+`trailer
+<<
+/Size ${newSize}
+/Root ${catalogNum} 0 R
+/Info ${infoNum} 0 R
+${idStr}/Prev ${oldXrefOffset}
+>>
+startxref
+${newXrefOffset}
+%%EOF
+`);
+
+  // ── 11. Concatenate original bytes + appended section ──────────
+  let totalLen = origBytes.length;
+  for (const c of chunks) totalLen += c.length;
+  const out = new Uint8Array(totalLen);
+  out.set(origBytes, 0);
+  let p = origBytes.length;
+  for (const c of chunks) { out.set(c, p); p += c.length; }
+  return out;
+};
+
+// Trigger a browser download for a Uint8Array as a named file.
+const __downloadBytes = (bytes, filename) => {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
 // localStorage key. State shape: { pages: [...], activeIndex }.
 // Pre-multi-page builds stored a single page object directly; we migrate on
 // first load so existing in-browser work isn't lost.
@@ -1804,7 +2066,17 @@ function App() {
         await captureCardIntoPdf(pdf, t);
         const safe = (t.title || "datasheet").replace(/[^a-z0-9 \-_]/gi, "").trim() || "datasheet";
         const bleedTag = t.bleed ? " bleed" : "";
-        pdf.save(`${safe} (${w}x${h}cm${bleedTag}).pdf`);
+        // Wrap the plain jsPDF output as PDF/X-4 (Coated FOGRA39) before
+        // saving — adds OutputIntent, XMP metadata, GTS_PDFXVersion, and
+        // a TrimBox per page so the file passes Acrobat's preflight.
+        const origBytes = new Uint8Array(pdf.output("arraybuffer"));
+        const icc = await __loadFogra39Icc();
+        const finalBytes = __toPdfX4(origBytes, {
+          title: safe,
+          iccBytes: icc,
+          pages: [{ bleedCm }],
+        });
+        __downloadBytes(finalBytes, `${safe} (${w}x${h}cm${bleedTag}).pdf`);
       } catch (e) {
         console.error("PDF export failed:", e);
         alert("PDF export failed: " + (e?.message || e));
@@ -1827,6 +2099,9 @@ function App() {
       try {
         const { jsPDF } = window.jspdf;
         let pdf = null;
+        // Track per-page bleed so the PDF/X-4 wrapper can write each
+        // page's TrimBox at the right inset.
+        const pdfPages = [];
         for (let i = 0; i < pages.length; i++) {
           setBatchProgress({ i: i + 1, n: pages.length });
           // Switch active page so the .datasheet DOM renders this page's state.
@@ -1846,10 +2121,21 @@ function App() {
             pdf.addPage([pageW, pageH], pageW >= pageH ? "landscape" : "portrait");
           }
           await captureCardIntoPdf(pdf, page);
+          pdfPages.push({ bleedCm });
         }
         setAppState(prev => ({ ...prev, activeIndex: originalIndex }));
         setBatchProgress(null);
-        if (pdf) pdf.save(`Datasheets (${pages.length} page${pages.length === 1 ? "" : "s"}).pdf`);
+        if (pdf) {
+          const origBytes = new Uint8Array(pdf.output("arraybuffer"));
+          const icc = await __loadFogra39Icc();
+          const finalBytes = __toPdfX4(origBytes, {
+            title: `Datasheets (${pages.length} pages)`,
+            iccBytes: icc,
+            pages: pdfPages,
+          });
+          __downloadBytes(finalBytes,
+            `Datasheets (${pages.length} page${pages.length === 1 ? "" : "s"}).pdf`);
+        }
       } catch (e) {
         console.error("Multi-page export failed:", e);
         alert("Export failed: " + (e?.message || e));
