@@ -618,6 +618,364 @@ const __drawTextAsPaths = (pdf, text, xCm, yBaselineCm, fontSizeCm, font) => {
   return advanceX * PT_TO_CM;
 };
 
+// Render a live SVG element into the PDF as filled vector paths, fitted
+// into the given rectangle (cm). Walks the SVG tree once, composes any
+// matrix/translate/scale/rotate transforms on parent <g>s, parses every
+// <path d="…"> (with full M/L/H/V/C/S/Q/T/A/Z, absolute + relative
+// support), expands shape elements (<rect>, <circle>, <ellipse>,
+// <polygon>, <polyline>) into path commands, then emits jsPDF raw
+// stream operators (m/l/c/h/f) so the output is real vector geometry
+// — Illustrator can edit it and the printer RIP rasterises it at the
+// output device's resolution rather than at the bitmap's fixed PNG
+// resolution. Paths with fill="none" (the dashed placeholder marker)
+// are skipped so they don't ghost into the final PDF.
+const __drawSvgIconAsPaths = (pdf, svgEl, rectCm) => {
+  const vbParts = (svgEl.getAttribute("viewBox") || "").trim().split(/\s+/).map(Number);
+  if (vbParts.length !== 4) return;
+  const [vbX, vbY, vbW, vbH] = vbParts;
+  if (!vbW || !vbH) return;
+
+  // preserveAspectRatio defaults to xMidYMid meet — fit-and-centre.
+  const scale = Math.min(rectCm.w / vbW, rectCm.h / vbH);
+  const offsetX = rectCm.x + (rectCm.w - vbW * scale) / 2;
+  const offsetY = rectCm.y + (rectCm.h - vbH * scale) / 2;
+
+  const sf = pdf.internal.scaleFactor;
+  const pageH = pdf.internal.pageSize.getHeight();
+  const xPdf = (cm) => (cm * sf).toFixed(3);
+  const yPdf = (cm) => ((pageH - cm) * sf).toFixed(3);
+  const toCmXY = (px, py) => [
+    offsetX + (px - vbX) * scale,
+    offsetY + (py - vbY) * scale,
+  ];
+
+  // SVG transform = 2×3 matrix in [a, b, c, d, e, f] order.
+  const matMul = (A, B) => [
+    A[0]*B[0] + A[2]*B[1],
+    A[1]*B[0] + A[3]*B[1],
+    A[0]*B[2] + A[2]*B[3],
+    A[1]*B[2] + A[3]*B[3],
+    A[0]*B[4] + A[2]*B[5] + A[4],
+    A[1]*B[4] + A[3]*B[5] + A[5],
+  ];
+  const apply = (T, x, y) => [T[0]*x + T[2]*y + T[4], T[1]*x + T[3]*y + T[5]];
+
+  const parseTransform = (s) => {
+    if (!s) return null;
+    let T = null;
+    const re = /(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]+)\)/g;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const fn = m[1];
+      const nums = m[2].split(/[\s,]+/).map(Number).filter((n) => !isNaN(n));
+      let local = null;
+      if (fn === "matrix" && nums.length >= 6) {
+        local = [nums[0], nums[1], nums[2], nums[3], nums[4], nums[5]];
+      } else if (fn === "translate") {
+        local = [1, 0, 0, 1, nums[0] || 0, nums[1] || 0];
+      } else if (fn === "scale") {
+        const sx = nums[0] || 1;
+        const sy = nums.length > 1 ? nums[1] : sx;
+        local = [sx, 0, 0, sy, 0, 0];
+      } else if (fn === "rotate") {
+        const a = (nums[0] || 0) * Math.PI / 180;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        if (nums.length >= 3) {
+          const cx = nums[1], cy = nums[2];
+          local = matMul([1, 0, 0, 1, cx, cy],
+                  matMul([ca, sa, -sa, ca, 0, 0],
+                         [1, 0, 0, 1, -cx, -cy]));
+        } else {
+          local = [ca, sa, -sa, ca, 0, 0];
+        }
+      } else if (fn === "skewX") {
+        local = [1, 0, Math.tan((nums[0] || 0) * Math.PI / 180), 1, 0, 0];
+      } else if (fn === "skewY") {
+        local = [1, Math.tan((nums[0] || 0) * Math.PI / 180), 0, 1, 0, 0];
+      }
+      if (local) T = T ? matMul(T, local) : local;
+    }
+    return T;
+  };
+
+  // d-attribute → token list. Numbers can run together ("1.2-3.4" is two
+  // numbers; "-.5.6" is "-.5" and ".6") so the regex matches one number
+  // at a time including optional sign and exponent.
+  const parsePathD = (d) => {
+    const re = /([MmLlHhVvCcSsQqTtAaZz])|(-?\d*\.\d+(?:[eE][-+]?\d+)?|-?\d+(?:[eE][-+]?\d+)?)/g;
+    const tokens = [];
+    let m;
+    while ((m = re.exec(d)) !== null) {
+      if (m[1]) tokens.push({ kind: "cmd", v: m[1] });
+      else tokens.push({ kind: "num", v: parseFloat(m[2]) });
+    }
+    const argCounts = { M:2, L:2, H:1, V:1, C:6, S:4, Q:4, T:2, A:7, Z:0 };
+    const cmds = [];
+    let i = 0;
+    let prevCmd = null;
+    while (i < tokens.length) {
+      let cmd;
+      if (tokens[i].kind === "cmd") {
+        cmd = tokens[i].v;
+        i++;
+      } else {
+        if (!prevCmd) break;
+        // Implicit-repeat rule: after M/m, repeats become L/l; otherwise same.
+        cmd = prevCmd === "M" ? "L" : prevCmd === "m" ? "l" : prevCmd;
+      }
+      const n = argCounts[cmd.toUpperCase()];
+      if (n === 0) {
+        cmds.push({ c: cmd, a: [] });
+      } else {
+        const args = [];
+        for (let j = 0; j < n; j++) {
+          if (i >= tokens.length || tokens[i].kind !== "num") return cmds;
+          args.push(tokens[i].v);
+          i++;
+        }
+        cmds.push({ c: cmd, a: args });
+      }
+      prevCmd = cmd;
+    }
+    return cmds;
+  };
+
+  // Elliptical arc → list of cubic bezier segments (≤ 90° each).
+  // Endpoint-to-centre parametrisation, then split by arcs of ≤π/2.
+  const arcToCubics = (x1, y1, rx, ry, phi, fa, fs, x2, y2) => {
+    if (x1 === x2 && y1 === y2) return [];
+    rx = Math.abs(rx); ry = Math.abs(ry);
+    if (rx === 0 || ry === 0) {
+      return [{ x1, y1, x2: x2, y2: y2, x: x2, y: y2 }];
+    }
+    const sinPhi = Math.sin(phi * Math.PI / 180);
+    const cosPhi = Math.cos(phi * Math.PI / 180);
+    const dx2 = (x1 - x2) / 2, dy2 = (y1 - y2) / 2;
+    const x1p = cosPhi * dx2 + sinPhi * dy2;
+    const y1p = -sinPhi * dx2 + cosPhi * dy2;
+    let rxSq = rx * rx, rySq = ry * ry;
+    const x1pSq = x1p * x1p, y1pSq = y1p * y1p;
+    const lambda = x1pSq / rxSq + y1pSq / rySq;
+    if (lambda > 1) {
+      const s = Math.sqrt(lambda);
+      rx *= s; ry *= s;
+      rxSq = rx * rx; rySq = ry * ry;
+    }
+    const radicand = Math.max(0, rxSq * rySq - rxSq * y1pSq - rySq * x1pSq);
+    let coef = Math.sqrt(radicand / (rxSq * y1pSq + rySq * x1pSq));
+    if (fa === fs) coef = -coef;
+    const cxp = coef * (rx * y1p) / ry;
+    const cyp = -coef * (ry * x1p) / rx;
+    const cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+    const cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+    const vecAngle = (ux, uy, vx, vy) => {
+      const sign = ux * vy - uy * vx < 0 ? -1 : 1;
+      const dot = (ux * vx + uy * vy) /
+                  (Math.sqrt(ux*ux + uy*uy) * Math.sqrt(vx*vx + vy*vy));
+      return sign * Math.acos(Math.max(-1, Math.min(1, dot)));
+    };
+    const theta1 = vecAngle(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+    let deltaTheta = vecAngle((x1p - cxp) / rx, (y1p - cyp) / ry,
+                              (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+    if (!fs && deltaTheta > 0) deltaTheta -= 2 * Math.PI;
+    if (fs && deltaTheta < 0) deltaTheta += 2 * Math.PI;
+    const segments = Math.max(1, Math.ceil(Math.abs(deltaTheta) / (Math.PI / 2)));
+    const dt = deltaTheta / segments;
+    const t = (4 / 3) * Math.tan(dt / 4);
+    const cubics = [];
+    const localToWorld = (lx, ly) => [
+      cosPhi * rx * lx - sinPhi * ry * ly + cx,
+      sinPhi * rx * lx + cosPhi * ry * ly + cy,
+    ];
+    for (let i = 0; i < segments; i++) {
+      const a0 = theta1 + i * dt;
+      const a1 = a0 + dt;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0);
+      const c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const [cp1x, cp1y] = localToWorld(c0 - t * s0, s0 + t * c0);
+      const [cp2x, cp2y] = localToWorld(c1 + t * s1, s1 - t * c1);
+      const [endX, endY] = localToWorld(c1, s1);
+      cubics.push({ x1: cp1x, y1: cp1y, x2: cp2x, y2: cp2y, x: endX, y: endY });
+    }
+    return cubics;
+  };
+
+  let stream = "";
+
+  const emitPath = (dStr, T) => {
+    const cmds = parsePathD(dStr);
+    if (!cmds.length) return;
+    let curX = 0, curY = 0;
+    let startX = 0, startY = 0;
+    let prevCCtrl = null;   // last cubic ctrl for S/s smoothing
+    let prevQCtrl = null;   // last quad ctrl for T/t smoothing
+    let hasGeometry = false;
+    const m = (px, py) => {
+      const [tx, ty] = apply(T, px, py);
+      const [cx, cy] = toCmXY(tx, ty);
+      stream += `${xPdf(cx)} ${yPdf(cy)} m\n`;
+    };
+    const l = (px, py) => {
+      const [tx, ty] = apply(T, px, py);
+      const [cx, cy] = toCmXY(tx, ty);
+      stream += `${xPdf(cx)} ${yPdf(cy)} l\n`;
+    };
+    const cu = (x1, y1, x2, y2, x, y) => {
+      const [t1x, t1y] = apply(T, x1, y1);
+      const [t2x, t2y] = apply(T, x2, y2);
+      const [tx, ty]   = apply(T, x, y);
+      const [c1x, c1y] = toCmXY(t1x, t1y);
+      const [c2x, c2y] = toCmXY(t2x, t2y);
+      const [cx, cy]   = toCmXY(tx, ty);
+      stream += `${xPdf(c1x)} ${yPdf(c1y)} ${xPdf(c2x)} ${yPdf(c2y)} ${xPdf(cx)} ${yPdf(cy)} c\n`;
+    };
+    for (const { c, a } of cmds) {
+      const k = c.toUpperCase();
+      const rel = c !== k;
+      if (k === "M") {
+        let x = a[0], y = a[1];
+        if (rel) { x += curX; y += curY; }
+        m(x, y);
+        curX = startX = x; curY = startY = y;
+        prevCCtrl = null; prevQCtrl = null;
+        hasGeometry = true;
+      } else if (k === "L") {
+        let x = a[0], y = a[1];
+        if (rel) { x += curX; y += curY; }
+        l(x, y);
+        curX = x; curY = y;
+        prevCCtrl = null; prevQCtrl = null;
+      } else if (k === "H") {
+        let x = a[0];
+        if (rel) x += curX;
+        l(x, curY); curX = x;
+        prevCCtrl = null; prevQCtrl = null;
+      } else if (k === "V") {
+        let y = a[0];
+        if (rel) y += curY;
+        l(curX, y); curY = y;
+        prevCCtrl = null; prevQCtrl = null;
+      } else if (k === "C") {
+        let [x1, y1, x2, y2, x, y] = a;
+        if (rel) { x1+=curX; y1+=curY; x2+=curX; y2+=curY; x+=curX; y+=curY; }
+        cu(x1, y1, x2, y2, x, y);
+        prevCCtrl = [x2, y2]; prevQCtrl = null;
+        curX = x; curY = y;
+      } else if (k === "S") {
+        let [x2, y2, x, y] = a;
+        if (rel) { x2+=curX; y2+=curY; x+=curX; y+=curY; }
+        const x1 = prevCCtrl ? 2*curX - prevCCtrl[0] : curX;
+        const y1 = prevCCtrl ? 2*curY - prevCCtrl[1] : curY;
+        cu(x1, y1, x2, y2, x, y);
+        prevCCtrl = [x2, y2]; prevQCtrl = null;
+        curX = x; curY = y;
+      } else if (k === "Q") {
+        let [x1, y1, x, y] = a;
+        if (rel) { x1+=curX; y1+=curY; x+=curX; y+=curY; }
+        const c1x = curX + (2/3)*(x1 - curX), c1y = curY + (2/3)*(y1 - curY);
+        const c2x = x + (2/3)*(x1 - x),       c2y = y + (2/3)*(y1 - y);
+        cu(c1x, c1y, c2x, c2y, x, y);
+        prevQCtrl = [x1, y1]; prevCCtrl = null;
+        curX = x; curY = y;
+      } else if (k === "T") {
+        let [x, y] = a;
+        if (rel) { x+=curX; y+=curY; }
+        const x1 = prevQCtrl ? 2*curX - prevQCtrl[0] : curX;
+        const y1 = prevQCtrl ? 2*curY - prevQCtrl[1] : curY;
+        const c1x = curX + (2/3)*(x1 - curX), c1y = curY + (2/3)*(y1 - curY);
+        const c2x = x + (2/3)*(x1 - x),       c2y = y + (2/3)*(y1 - y);
+        cu(c1x, c1y, c2x, c2y, x, y);
+        prevQCtrl = [x1, y1]; prevCCtrl = null;
+        curX = x; curY = y;
+      } else if (k === "A") {
+        let [rx, ry, phi, fa, fs, x, y] = a;
+        if (rel) { x+=curX; y+=curY; }
+        const arcs = arcToCubics(curX, curY, rx, ry, phi, fa, fs, x, y);
+        for (const ar of arcs) cu(ar.x1, ar.y1, ar.x2, ar.y2, ar.x, ar.y);
+        prevCCtrl = null; prevQCtrl = null;
+        curX = x; curY = y;
+      } else if (k === "Z") {
+        stream += "h\n";
+        curX = startX; curY = startY;
+        prevCCtrl = null; prevQCtrl = null;
+      }
+    }
+    if (hasGeometry) stream += "f\n";   // non-zero fill, like text outlines
+  };
+
+  // SVG fill inherits down the tree, so an outer <svg fill="none"> applies
+  // to every shape inside even when each shape omits its own fill attr.
+  // Track inherited fill-none state through the walk so stroke-only
+  // icons (the _blank dashed placeholder, Lucide-style outlines that
+  // users might paste) don't print as solid black blocks.
+  const walk = (node, T, inheritedFillNone) => {
+    if (!node || node.nodeType !== 1) return;
+    const tag = (node.tagName || "").toLowerCase();
+    const localT = parseTransform(node.getAttribute && node.getAttribute("transform"));
+    const cur = localT ? matMul(T, localT) : T;
+    const fillAttr = node.getAttribute && node.getAttribute("fill");
+    const styleStr = (node.getAttribute && node.getAttribute("style")) || "";
+    const ownFillNone = fillAttr === "none" || /fill\s*:\s*none/i.test(styleStr);
+    const ownFillSet  = !!fillAttr || /(^|;)\s*fill\s*:/i.test(styleStr);
+    // A node's effective fill is "none" if it explicitly says so, or if
+    // it inherited "none" AND didn't override with its own fill.
+    const isFillNone = ownFillNone || (inheritedFillNone && !ownFillSet);
+    if (tag === "path") {
+      if (isFillNone) return;
+      const d = node.getAttribute("d");
+      if (d) emitPath(d, cur);
+    } else if (tag === "rect" && !isFillNone) {
+      const x = +(node.getAttribute("x") || 0);
+      const y = +(node.getAttribute("y") || 0);
+      const w = +(node.getAttribute("width") || 0);
+      const h = +(node.getAttribute("height") || 0);
+      if (w > 0 && h > 0) {
+        emitPath(`M${x} ${y}h${w}v${h}h${-w}z`, cur);
+      }
+    } else if (tag === "circle" && !isFillNone) {
+      const cx = +(node.getAttribute("cx") || 0);
+      const cy = +(node.getAttribute("cy") || 0);
+      const r  = +(node.getAttribute("r") || 0);
+      if (r > 0) {
+        const k = 0.5522847498307936;
+        emitPath(
+          `M${cx - r} ${cy}` +
+          `C${cx - r} ${cy - r*k} ${cx - r*k} ${cy - r} ${cx} ${cy - r}` +
+          `C${cx + r*k} ${cy - r} ${cx + r} ${cy - r*k} ${cx + r} ${cy}` +
+          `C${cx + r} ${cy + r*k} ${cx + r*k} ${cy + r} ${cx} ${cy + r}` +
+          `C${cx - r*k} ${cy + r} ${cx - r} ${cy + r*k} ${cx - r} ${cy}z`, cur);
+      }
+    } else if (tag === "ellipse" && !isFillNone) {
+      const cx = +(node.getAttribute("cx") || 0);
+      const cy = +(node.getAttribute("cy") || 0);
+      const rx = +(node.getAttribute("rx") || 0);
+      const ry = +(node.getAttribute("ry") || 0);
+      if (rx > 0 && ry > 0) {
+        const k = 0.5522847498307936;
+        emitPath(
+          `M${cx - rx} ${cy}` +
+          `C${cx - rx} ${cy - ry*k} ${cx - rx*k} ${cy - ry} ${cx} ${cy - ry}` +
+          `C${cx + rx*k} ${cy - ry} ${cx + rx} ${cy - ry*k} ${cx + rx} ${cy}` +
+          `C${cx + rx} ${cy + ry*k} ${cx + rx*k} ${cy + ry} ${cx} ${cy + ry}` +
+          `C${cx - rx*k} ${cy + ry} ${cx - rx} ${cy + ry*k} ${cx - rx} ${cy}z`, cur);
+      }
+    } else if ((tag === "polygon" || tag === "polyline") && !isFillNone) {
+      const pts = (node.getAttribute("points") || "").trim().split(/[\s,]+/).map(Number);
+      if (pts.length >= 4) {
+        let d = `M${pts[0]} ${pts[1]}`;
+        for (let i = 2; i + 1 < pts.length; i += 2) d += `L${pts[i]} ${pts[i+1]}`;
+        if (tag === "polygon") d += "z";
+        emitPath(d, cur);
+      }
+    } else if (tag === "g" || tag === "svg" || tag === "symbol") {
+      for (let i = 0; i < node.children.length; i++) walk(node.children[i], cur, isFillNone);
+    }
+  };
+
+  walk(svgEl, [1, 0, 0, 1, 0, 0], false);
+  if (stream) pdf.internal.write(stream);
+};
+
 // localStorage key. State shape: { pages: [...], activeIndex }.
 // Pre-multi-page builds stored a single page object directly; we migrate on
 // first load so existing in-browser work isn't lost.
@@ -1022,7 +1380,10 @@ function App() {
     const specTextInfos = specTextEls.map((el) => ({ ...posOf(el), font: fontInfo(el), text: el.innerText }));
     const specIconInfos = specIconBtns.map((btn) => {
       const svg = btn.querySelector("span > svg, svg");
-      return svg ? { svg, ...posOf(btn) } : null;
+      // Measure the SVG itself (not the button) so the vector overlay lands
+      // on the exact content rect — the button has 0.4mm dashed border +
+      // 0.4mm padding around the SVG that we don't want to count.
+      return svg ? { svg, ...posOf(svg) } : null;
     });
     const qrLabelInfo   = qrLabelEl ? { ...posOf(qrLabelEl), font: fontInfo(qrLabelEl), text: qrLabelEl.innerText } : null;
     const bracketsInfo  = brackets.map(posOf);
@@ -1039,12 +1400,14 @@ function App() {
     })) : [];
 
     // ─── Hide everything we'll redraw as vector ─────────────────────
-    // (Spec icons are kept visible — the new Batavia icon set uses filled
-    // paths, and the SVG-to-jsPDF renderer only strokes, so we let
-    // html2canvas capture them as bitmap instead of stroking outlines.)
+    // Spec icons get hidden too — we redraw them below as filled vector
+    // paths via __drawSvgIconAsPaths so Illustrator can edit them and
+    // the print RIP rasterises at the device's native resolution rather
+    // than the bitmap's fixed PNG resolution.
     // The cut-line marker is on-screen guidance only; it must not print.
     const visEls = [
       triangleEl, titleEl, subtitleEl, ...specTextEls,
+      ...specIconBtns,
       qrSvg, qrLabelEl, ...brackets, cutLineEl,
     ].filter(Boolean);
     const prevVisMap = new Map();
@@ -1109,9 +1472,15 @@ function App() {
                           info.font.cm, robotoFonts.regular);
       });
 
-      // ─── 6. Spec icons — captured in the bitmap above; no vector overlay
-      //       (the new Batavia icon set uses filled paths, and an outline-
-      //       only redraw would print the wrong shape).
+      // ─── 6. Spec icons (CMYK black, vector paths) ────────────────
+      //       Hidden during the bitmap above, redrawn here as real
+      //       vector geometry so the PDF stays editable in Illustrator
+      //       and prints at the RIP's native resolution.
+      setBlackFill();
+      specIconInfos.forEach((info) => {
+        if (!info || !info.svg) return;
+        __drawSvgIconAsPaths(pdf, info.svg, { x: info.x, y: info.y, w: info.w, h: info.h });
+      });
 
       // ─── 7. QR rendering ──────────────────────────────────────────
       if (qrSvg && qrSvgInfo && qrChildren.length) {
